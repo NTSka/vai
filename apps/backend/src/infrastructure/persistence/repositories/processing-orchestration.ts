@@ -20,11 +20,24 @@ export type ProcessingRepository = {
     readonly correlationId?: string;
     readonly causationId?: string;
   }): Promise<typeof schema.processingJobs.$inferSelect>;
-  markStatus(input: {
+  completeJob(input: {
     readonly organizationId: string;
     readonly id: string;
-    readonly status: "pending" | "queued" | "running" | "completed" | "failed" | "cancelled";
-    readonly error?: { code: string; message: string; details?: Record<string, unknown> };
+  }): Promise<typeof schema.processingJobs.$inferSelect>;
+  failJob(input: {
+    readonly organizationId: string;
+    readonly id: string;
+    readonly error: { code: string; message: string; details?: Record<string, unknown> };
+  }): Promise<typeof schema.processingJobs.$inferSelect>;
+  cancelJob(input: {
+    readonly organizationId: string;
+    readonly id: string;
+    readonly reason?: { code: string; message: string; details?: Record<string, unknown> };
+  }): Promise<typeof schema.processingJobs.$inferSelect>;
+  retryJob(input: {
+    readonly organizationId: string;
+    readonly id: string;
+    readonly delayMs?: number;
   }): Promise<typeof schema.processingJobs.$inferSelect>;
   createDependency(input: {
     readonly organizationId: string;
@@ -47,14 +60,25 @@ export function createProcessingRepository(db: Db): ProcessingRepository {
         })
         .where(sql`${schema.processingJobs.id} = (
           select id from processing_jobs
-          where (
-              status = 'queued'
-              and (next_run_at is null or next_run_at <= now())
-            )
-            or (
-              status = 'running'
-              and job_type = 'input_file_validation'
-              and started_at < now() - interval '5 minutes'
+          where status = 'queued'
+            and (next_run_at is null or next_run_at <= now())
+            and not exists (
+              select 1 from processing_job_dependencies dep
+              join processing_jobs dependency_job
+                on dependency_job.id = dep.depends_on_job_id
+                and dependency_job.organization_id = dep.organization_id
+              where dep.job_id = processing_jobs.id
+                and dep.organization_id = processing_jobs.organization_id
+                and (
+                  (
+                    dep.condition = 'completed'
+                    and dependency_job.status <> 'completed'
+                  )
+                  or (
+                    dep.condition = 'completed_or_skipped'
+                    and dependency_job.status not in ('completed', 'cancelled')
+                  )
+                )
             )
           order by coalesce(scheduled_at, created_at), created_at
           for update skip locked
@@ -100,26 +124,110 @@ export function createProcessingRepository(db: Db): ProcessingRepository {
       return requireRow(job, "processing job");
     },
 
-    async markStatus(input) {
+    async completeJob(input) {
       const now = new Date();
       const [job] = await db
         .update(schema.processingJobs)
         .set({
-          status: input.status,
-          startedAt: input.status === "running" ? now : undefined,
-          completedAt: input.status === "completed" ? now : undefined,
+          status: "completed",
+          completedAt: now,
+          error: null,
+          updatedAt: now
+        })
+        .where(
+          and(
+            eq(schema.processingJobs.organizationId, input.organizationId),
+            eq(schema.processingJobs.id, input.id),
+            eq(schema.processingJobs.status, "running")
+          )
+        )
+        .returning();
+
+      return requireRow(job, "running processing job");
+    },
+
+    async failJob(input) {
+      const now = new Date();
+      const [job] = await db
+        .update(schema.processingJobs)
+        .set({
+          status: "failed",
           error: input.error,
           updatedAt: now
         })
         .where(
           and(
             eq(schema.processingJobs.organizationId, input.organizationId),
-            eq(schema.processingJobs.id, input.id)
+            eq(schema.processingJobs.id, input.id),
+            eq(schema.processingJobs.status, "running")
           )
         )
         .returning();
 
-      return requireRow(job, "processing job");
+      return requireRow(job, "running processing job");
+    },
+
+    async cancelJob(input) {
+      const now = new Date();
+      const [job] = await db
+        .update(schema.processingJobs)
+        .set({
+          status: "cancelled",
+          error: input.reason,
+          updatedAt: now
+        })
+        .where(
+          and(
+            eq(schema.processingJobs.organizationId, input.organizationId),
+            eq(schema.processingJobs.id, input.id),
+            sql`${schema.processingJobs.status} not in ('completed', 'cancelled')`
+          )
+        )
+        .returning();
+
+      return requireRow(job, "cancellable processing job");
+    },
+
+    async retryJob(input) {
+      const now = new Date();
+      const delayMs = input.delayMs ?? 0;
+      const nextRunAt = delayMs > 0 ? new Date(now.getTime() + delayMs) : null;
+      const [job] = await db
+        .update(schema.processingJobs)
+        .set({
+          attempts: sql`${schema.processingJobs.attempts} + 1`,
+          status: sql`case
+            when ${schema.processingJobs.attempts} + 1 < ${schema.processingJobs.maxAttempts}
+              then 'queued'::processing_job_status
+            else 'failed'::processing_job_status
+          end`,
+          nextRunAt: sql`case
+            when ${schema.processingJobs.attempts} + 1 < ${schema.processingJobs.maxAttempts}
+              then ${nextRunAt}
+            else ${schema.processingJobs.nextRunAt}
+          end`,
+          startedAt: sql`case
+            when ${schema.processingJobs.attempts} + 1 < ${schema.processingJobs.maxAttempts}
+              then null
+            else ${schema.processingJobs.startedAt}
+          end`,
+          error: sql`case
+            when ${schema.processingJobs.attempts} + 1 < ${schema.processingJobs.maxAttempts}
+              then null
+            else ${schema.processingJobs.error}
+          end`,
+          updatedAt: now
+        })
+        .where(
+          and(
+            eq(schema.processingJobs.organizationId, input.organizationId),
+            eq(schema.processingJobs.id, input.id),
+            eq(schema.processingJobs.status, "failed")
+          )
+        )
+        .returning();
+
+      return requireRow(job, "failed processing job");
     },
 
     async createDependency(input) {

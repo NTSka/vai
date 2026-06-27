@@ -63,10 +63,9 @@ export function createInputFileValidatorProcessor(input: {
       }
 
       if (job.jobType !== "input_file_validation") {
-        await input.processing.markStatus({
+        await input.processing.failJob({
           organizationId: executionInput.organizationId,
           id: executionInput.jobId,
-          status: "failed",
           error: {
             code: "invalid_job_type",
             message: "Job is not an input file validation job",
@@ -78,10 +77,9 @@ export function createInputFileValidatorProcessor(input: {
 
       const parsedPayload = inputFileValidationPayloadSchema.safeParse(job.payload);
       if (!parsedPayload.success) {
-        await input.processing.markStatus({
+        await input.processing.failJob({
           organizationId: executionInput.organizationId,
           id: executionInput.jobId,
-          status: "failed",
           error: {
             code: "invalid_job_payload",
             message: "Input file validation job payload is invalid",
@@ -253,10 +251,9 @@ async function failJobAndSet(input: {
     id: input.documentSetId,
     status: "failed"
   });
-  await input.processing.markStatus({
+  await input.processing.failJob({
     organizationId: input.organizationId,
     id: input.jobId,
-    status: "failed",
     error: buildProcessingError(input)
   });
 }
@@ -269,10 +266,9 @@ async function failJob(input: {
   readonly message: string;
   readonly details?: Record<string, unknown>;
 }): Promise<void> {
-  await input.processing.markStatus({
+  await input.processing.failJob({
     organizationId: input.organizationId,
     id: input.jobId,
-    status: "failed",
     error: buildProcessingError(input)
   });
 }
@@ -320,10 +316,9 @@ export async function completeAcceptedInputValidationWithRepositories(input: {
     causationId: input.jobId,
     ...(input.correlationId ? { correlationId: input.correlationId } : {})
   });
-  await input.processing.markStatus({
+  await input.processing.completeJob({
     organizationId: input.organizationId,
-    id: input.jobId,
-    status: "completed"
+    id: input.jobId
   });
 }
 

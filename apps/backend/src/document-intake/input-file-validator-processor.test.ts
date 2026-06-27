@@ -210,11 +210,8 @@ function createProcessorFixture(
     async enqueue() {
       throw new Error("not used");
     },
-    async markStatus(input) {
-      jobStatuses.push(input.status);
-      if (input.error) {
-        jobErrors.push(input.error);
-      }
+    async completeJob(input) {
+      jobStatuses.push("completed");
       return {
         id: input.id,
         organizationId: input.organizationId,
@@ -225,12 +222,90 @@ function createProcessorFixture(
           documentSetId: "document-set-1",
           inputFileIds: ["stored-file-1"]
         },
-        status: input.status,
+        status: "completed",
+        scheduledAt: new Date(),
+        startedAt: new Date(),
+        completedAt: new Date(),
+        error: null,
+        attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async failJob(input) {
+      jobStatuses.push("failed");
+      jobErrors.push(input.error);
+      return {
+        id: input.id,
+        organizationId: input.organizationId,
+        processorId: "input_file_validator",
+        processorVersion: "1.0.0",
+        jobType: "input_file_validation",
+        payload: {
+          documentSetId: "document-set-1",
+          inputFileIds: ["stored-file-1"]
+        },
+        status: "failed",
+        scheduledAt: new Date(),
+        startedAt: new Date(),
+        completedAt: null,
+        error: input.error,
+        attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async cancelJob(input) {
+      jobStatuses.push("cancelled");
+      return {
+        id: input.id,
+        organizationId: input.organizationId,
+        processorId: "input_file_validator",
+        processorVersion: "1.0.0",
+        jobType: "input_file_validation",
+        payload: {
+          documentSetId: "document-set-1",
+          inputFileIds: ["stored-file-1"]
+        },
+        status: "cancelled",
         scheduledAt: new Date(),
         startedAt: null,
-        completedAt: input.status === "completed" ? new Date() : null,
-        error: input.error ?? null,
+        completedAt: null,
+        error: input.reason ?? null,
         attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async retryJob(input) {
+      return {
+        id: input.id,
+        organizationId: input.organizationId,
+        processorId: "input_file_validator",
+        processorVersion: "1.0.0",
+        jobType: "input_file_validation",
+        payload: {
+          documentSetId: "document-set-1",
+          inputFileIds: ["stored-file-1"]
+        },
+        status: "queued",
+        scheduledAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+        error: null,
+        attempts: 1,
         maxAttempts: 3,
         nextRunAt: null,
         correlationId: "correlation-1",
@@ -330,6 +405,9 @@ function createProcessorFixture(
       throw new Error("not used");
     },
     async storeCheckpoint() {
+      throw new Error("not used");
+    },
+    async deliverConsumerEvent() {
       throw new Error("not used");
     }
   };

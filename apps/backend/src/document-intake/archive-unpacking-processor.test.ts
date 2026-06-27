@@ -161,8 +161,8 @@ function createArchiveFixture(input: {
     async enqueue() {
       throw new Error("not used");
     },
-    async markStatus(status) {
-      jobStatuses.push(status.status);
+    async completeJob(status) {
+      jobStatuses.push("completed");
       return {
         id: status.id,
         organizationId: status.organizationId,
@@ -170,12 +170,80 @@ function createArchiveFixture(input: {
         processorVersion: "1.0.0",
         jobType: "archive_unpacking",
         payload: {},
-        status: status.status,
+        status: "completed",
+        scheduledAt: new Date(),
+        startedAt: new Date(),
+        completedAt: new Date(),
+        error: null,
+        attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async failJob(status) {
+      jobStatuses.push("failed");
+      return {
+        id: status.id,
+        organizationId: status.organizationId,
+        processorId: "archive_unpacker",
+        processorVersion: "1.0.0",
+        jobType: "archive_unpacking",
+        payload: {},
+        status: "failed",
         scheduledAt: new Date(),
         startedAt: new Date(),
         completedAt: null,
-        error: status.error ?? null,
+        error: status.error,
         attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async cancelJob(status) {
+      jobStatuses.push("cancelled");
+      return {
+        id: status.id,
+        organizationId: status.organizationId,
+        processorId: "archive_unpacker",
+        processorVersion: "1.0.0",
+        jobType: "archive_unpacking",
+        payload: {},
+        status: "cancelled",
+        scheduledAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+        error: status.reason ?? null,
+        attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async retryJob(status) {
+      return {
+        id: status.id,
+        organizationId: status.organizationId,
+        processorId: "archive_unpacker",
+        processorVersion: "1.0.0",
+        jobType: "archive_unpacking",
+        payload: {},
+        status: "queued",
+        scheduledAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+        error: null,
+        attempts: 1,
         maxAttempts: 3,
         nextRunAt: null,
         correlationId: "correlation-1",

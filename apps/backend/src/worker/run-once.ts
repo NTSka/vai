@@ -10,7 +10,12 @@ import {
 } from "../infrastructure/persistence/repositories.js";
 import { createObjectStorageClient } from "../infrastructure/object-storage/plugin.js";
 import * as schema from "../infrastructure/persistence/schema/index.js";
-import { createProcessorRuntime } from "../processing/processor-runtime.js";
+import {
+  createDefaultProcessorRegistry,
+  createProcessorRuntime
+} from "../processing/processor-runtime.js";
+import { createEventBus } from "../processing/event-bus.js";
+import { createOrchestratorRegistry } from "../processing/orchestrator-registry.js";
 
 export type WorkerRunResult = "processed" | "idle";
 
@@ -74,12 +79,14 @@ function createRuntime(
   db: NodePgDatabase<typeof schema.schema>,
   bucket: string,
   objectStorage: ReturnType<typeof createObjectStorageClient>
-): ReturnType<typeof createProcessorRuntime> {
+): { runNext(): Promise<WorkerRunResult> } {
   const processing = createProcessingRepository(db);
   const documentIntake = createDocumentIntakeRepository(db);
   const eventing = createEventingRepository(db);
+  const eventBus = createEventBus({ eventing });
+  createOrchestratorRegistry({ eventBus });
 
-  return createProcessorRuntime({
+  const registry = createDefaultProcessorRegistry({
     processing,
     documentIntake,
     eventing,
@@ -128,6 +135,19 @@ function createRuntime(
         });
       })
   });
+
+  const processorRuntime = createProcessorRuntime({ processing, registry });
+
+  return {
+    async runNext() {
+      const deliveredEvents = await eventBus.dispatchPending();
+      if (deliveredEvents > 0) {
+        return "processed";
+      }
+
+      return processorRuntime.runNext();
+    }
+  };
 }
 
 async function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {

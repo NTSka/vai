@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import * as schema from "../schema/index.js";
 import type { Db } from "./common.js";
@@ -18,12 +18,18 @@ export type EventingRepository = {
   ): Promise<typeof schema.domainEvents.$inferSelect | undefined>;
   readPendingForConsumer(input: {
     readonly consumerName: string;
+    readonly eventTypes?: readonly string[];
     readonly limit: number;
   }): Promise<ReadonlyArray<typeof schema.domainEvents.$inferSelect>>;
   storeCheckpoint(input: {
     readonly consumerName: string;
     readonly eventId: string;
   }): Promise<typeof schema.eventConsumerCheckpoints.$inferSelect | undefined>;
+  deliverConsumerEvent<T>(input: {
+    readonly consumerName: string;
+    readonly eventId: string;
+    readonly handler: () => Promise<T>;
+  }): Promise<{ readonly delivered: true; readonly result: T } | { readonly delivered: false }>;
 };
 
 export function createEventingRepository(db: Db): EventingRepository {
@@ -70,6 +76,10 @@ export function createEventingRepository(db: Db): EventingRepository {
     },
 
     async readPendingForConsumer(input) {
+      if (input.eventTypes && input.eventTypes.length === 0) {
+        return [];
+      }
+
       return db
         .select()
         .from(schema.domainEvents)
@@ -78,7 +88,14 @@ export function createEventingRepository(db: Db): EventingRepository {
           sql`${schema.eventConsumerCheckpoints.eventId} = ${schema.domainEvents.id}
             and ${schema.eventConsumerCheckpoints.consumerName} = ${input.consumerName}`
         )
-        .where(isNull(schema.eventConsumerCheckpoints.eventId))
+        .where(
+          and(
+            isNull(schema.eventConsumerCheckpoints.eventId),
+            input.eventTypes
+              ? inArray(schema.domainEvents.type, [...input.eventTypes])
+              : undefined
+          )
+        )
         .orderBy(asc(schema.domainEvents.publishedAt), asc(schema.domainEvents.id))
         .limit(input.limit)
         .then((rows) => rows.map((row) => row.domain_events));
@@ -92,6 +109,40 @@ export function createEventingRepository(db: Db): EventingRepository {
         .returning();
 
       return checkpoint;
+    },
+
+    async deliverConsumerEvent(input) {
+      return db.transaction(async (tx) => {
+        const lockResult = await tx.execute<{ locked: boolean }>(
+          sql`select pg_try_advisory_xact_lock(hashtextextended(${`${input.consumerName}:${input.eventId}`}, 0)) as locked`
+        );
+        const locked = lockResult.rows[0]?.locked === true;
+        if (!locked) {
+          return { delivered: false };
+        }
+
+        const existingCheckpoint = await tx
+          .select()
+          .from(schema.eventConsumerCheckpoints)
+          .where(
+            and(
+              eq(schema.eventConsumerCheckpoints.consumerName, input.consumerName),
+              eq(schema.eventConsumerCheckpoints.eventId, input.eventId)
+            )
+          )
+          .limit(1);
+        if (existingCheckpoint.length > 0) {
+          return { delivered: false };
+        }
+
+        const result = await input.handler();
+        await tx.insert(schema.eventConsumerCheckpoints).values({
+          consumerName: input.consumerName,
+          eventId: input.eventId
+        });
+
+        return { delivered: true, result };
+      });
     }
   };
 }

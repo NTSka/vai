@@ -322,10 +322,10 @@ describe("Phase 3 repositories", () => {
       dependsOnJobId: validationJob.id,
       condition: "completed"
     });
-    const completed = await processing.markStatus({
+    await processing.claimNextRunnable();
+    const completed = await processing.completeJob({
       organizationId: context.organization.id,
-      id: validationJob.id,
-      status: "completed"
+      id: validationJob.id
     });
     const event = await eventing.publish({
       type: "document_set.accepted",
@@ -373,6 +373,239 @@ describe("Phase 3 repositories", () => {
       event.id
     );
     expect(result.warnings).toHaveLength(1);
+  });
+
+  dbIt("serializes consumer event delivery before side effects", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database);
+    const eventing = createEventingRepository(database);
+    const event = await eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: { documentSetId: context.documentSet.id }
+    });
+    const secondClient = new Client({ connectionString: config.databaseUrl });
+
+    await secondClient.connect();
+    try {
+      const secondDb = drizzle(secondClient, { schema: schema.schema });
+      const secondEventing = createEventingRepository(secondDb);
+      let sideEffects = 0;
+      let releaseFirstDelivery: () => void = () => undefined;
+      const firstDeliveryCanFinish = new Promise<void>((resolve) => {
+        releaseFirstDelivery = resolve;
+      });
+      let firstDeliveryStarted: () => void = () => undefined;
+      const firstDeliveryDidStart = new Promise<void>((resolve) => {
+        firstDeliveryStarted = resolve;
+      });
+
+      const firstDelivery = eventing.deliverConsumerEvent({
+        consumerName: "document-registrar",
+        eventId: event.id,
+        handler: async () => {
+          sideEffects += 1;
+          firstDeliveryStarted();
+          await firstDeliveryCanFinish;
+          return "first";
+        }
+      });
+      await firstDeliveryDidStart;
+
+      const secondDelivery = await secondEventing.deliverConsumerEvent({
+        consumerName: "document-registrar",
+        eventId: event.id,
+        handler: async () => {
+          sideEffects += 1;
+          return "second";
+        }
+      });
+      releaseFirstDelivery();
+      const firstDeliveryResult = await firstDelivery;
+
+      expect(secondDelivery.delivered).toBe(false);
+      expect(firstDeliveryResult.delivered).toBe(true);
+      expect(sideEffects).toBe(1);
+      expect(
+        await eventing.readPendingForConsumer({
+          consumerName: "document-registrar",
+          eventTypes: ["document_set.accepted"],
+          limit: 10
+        })
+      ).toEqual([]);
+    } finally {
+      await secondClient.end();
+    }
+  });
+
+  dbIt("claims only dependency-ready queued jobs and supports strict completion", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database);
+    const processing = createProcessingRepository(database);
+    const validationJob = await processing.enqueue({
+      organizationId: context.organization.id,
+      processorId: "input_file_validator",
+      processorVersion: "1.0.0",
+      jobType: "input_file_validation",
+      payload: { documentSetId: context.documentSet.id }
+    });
+    const registrationJob = await processing.enqueue({
+      organizationId: context.organization.id,
+      processorId: "document_registrar",
+      processorVersion: "1.0.0",
+      jobType: "document_registration",
+      payload: { documentSetId: context.documentSet.id }
+    });
+    await processing.createDependency({
+      organizationId: context.organization.id,
+      jobId: registrationJob.id,
+      dependsOnJobId: validationJob.id,
+      condition: "completed"
+    });
+
+    const firstClaim = await processing.claimNextRunnable();
+    expect(firstClaim?.id).toBe(validationJob.id);
+    await expect(
+      processing.completeJob({
+        organizationId: context.organization.id,
+        id: registrationJob.id
+      })
+    ).rejects.toThrow();
+
+    await processing.completeJob({
+      organizationId: context.organization.id,
+      id: validationJob.id
+    });
+    const secondClaim = await processing.claimNextRunnable();
+
+    expect(secondClaim?.id).toBe(registrationJob.id);
+  });
+
+  dbIt("honors completed_or_skipped dependencies when upstream jobs are cancelled", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database);
+    const processing = createProcessingRepository(database);
+    const optionalUpstreamJob = await processing.enqueue({
+      organizationId: context.organization.id,
+      processorId: "optional_processor",
+      processorVersion: "1.0.0",
+      jobType: "optional_job",
+      payload: {}
+    });
+    const dependentJob = await processing.enqueue({
+      organizationId: context.organization.id,
+      processorId: "dependent_processor",
+      processorVersion: "1.0.0",
+      jobType: "dependent_job",
+      payload: {}
+    });
+    await processing.createDependency({
+      organizationId: context.organization.id,
+      jobId: dependentJob.id,
+      dependsOnJobId: optionalUpstreamJob.id,
+      condition: "completed_or_skipped"
+    });
+
+    await processing.cancelJob({
+      organizationId: context.organization.id,
+      id: optionalUpstreamJob.id,
+      reason: { code: "optional_job_skipped", message: "Optional job skipped" }
+    });
+    const claim = await processing.claimNextRunnable();
+
+    expect(claim?.id).toBe(dependentJob.id);
+  });
+
+  dbIt("retries failed jobs until attempts are exhausted", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database);
+    const processing = createProcessingRepository(database);
+    const job = await processing.enqueue({
+      organizationId: context.organization.id,
+      processorId: "retryable_processor",
+      processorVersion: "1.0.0",
+      jobType: "retryable_job",
+      payload: {},
+      maxAttempts: 2
+    });
+
+    const firstClaim = await processing.claimNextRunnable();
+    expect(firstClaim?.id).toBe(job.id);
+    await processing.failJob({
+      organizationId: context.organization.id,
+      id: job.id,
+      error: { code: "temporary_failure", message: "Temporary failure" }
+    });
+    const retry = await processing.retryJob({
+      organizationId: context.organization.id,
+      id: job.id
+    });
+    expect(retry.status).toBe("queued");
+    expect(retry.attempts).toBe(1);
+
+    const secondClaim = await processing.claimNextRunnable();
+    expect(secondClaim?.id).toBe(job.id);
+    await processing.failJob({
+      organizationId: context.organization.id,
+      id: job.id,
+      error: { code: "temporary_failure", message: "Temporary failure" }
+    });
+    const exhausted = await processing.retryJob({
+      organizationId: context.organization.id,
+      id: job.id
+    });
+
+    expect(exhausted.status).toBe("failed");
+    expect(exhausted.attempts).toBe(2);
+  });
+
+  dbIt("clears stale errors when retried jobs complete successfully", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database);
+    const processing = createProcessingRepository(database);
+    const job = await processing.enqueue({
+      organizationId: context.organization.id,
+      processorId: "retryable_processor",
+      processorVersion: "1.0.0",
+      jobType: "retryable_job",
+      payload: {},
+      maxAttempts: 3
+    });
+
+    await processing.claimNextRunnable();
+    await processing.failJob({
+      organizationId: context.organization.id,
+      id: job.id,
+      error: { code: "temporary_failure", message: "Temporary failure" }
+    });
+    const retried = await processing.retryJob({
+      organizationId: context.organization.id,
+      id: job.id
+    });
+    expect(retried.status).toBe("queued");
+    expect(retried.error).toBeNull();
+
+    await processing.claimNextRunnable();
+    const completed = await processing.completeJob({
+      organizationId: context.organization.id,
+      id: job.id
+    });
+
+    expect(completed.status).toBe("completed");
+    expect(completed.error).toBeNull();
   });
 
   dbIt("rejects cross-organization processing dependencies, provenance, and baseline results", async () => {

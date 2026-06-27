@@ -74,10 +74,9 @@ export function createArchiveUnpackingProcessor(input: {
 
       const parsedPayload = archiveUnpackingPayloadSchema.safeParse(job.payload);
       if (!parsedPayload.success) {
-        await input.processing.markStatus({
+        await input.processing.failJob({
           organizationId: executionInput.organizationId,
           id: executionInput.jobId,
-          status: "failed",
           error: {
             code: "invalid_job_payload",
             message: "Archive unpacking job payload is invalid",
@@ -93,10 +92,9 @@ export function createArchiveUnpackingProcessor(input: {
         id: payload.documentSetId
       });
       if (!documentSet) {
-        await input.processing.markStatus({
+        await input.processing.failJob({
           organizationId: executionInput.organizationId,
           id: executionInput.jobId,
-          status: "failed",
           error: {
             code: "document_set_not_found",
             message: "Document set was not found for archive unpacking"
@@ -511,10 +509,9 @@ async function failJobAndSet(input: {
     id: input.documentSetId,
     status: "failed"
   });
-  await input.processing.markStatus({
+  await input.processing.failJob({
     organizationId: input.organizationId,
     id: input.jobId,
-    status: "failed",
     error: {
       code: input.code,
       message: input.message,
