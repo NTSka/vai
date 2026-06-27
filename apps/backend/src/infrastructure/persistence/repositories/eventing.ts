@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import * as schema from "../schema/index.js";
 import type { Db } from "./common.js";
@@ -10,6 +10,11 @@ export type EventingRepository = {
     readonly aggregateType: string;
     readonly aggregateId: string;
   }): Promise<typeof schema.domainEvents.$inferSelect | undefined>;
+  listEventsForDocumentSet(input: {
+    readonly organizationId: string;
+    readonly documentSetId: string;
+    readonly limit?: number;
+  }): Promise<ReadonlyArray<typeof schema.domainEvents.$inferSelect>>;
   publish(input: Omit<typeof schema.domainEvents.$inferInsert, "id">): Promise<
     typeof schema.domainEvents.$inferSelect
   >;
@@ -48,6 +53,26 @@ export function createEventingRepository(db: Db): EventingRepository {
         .limit(1);
 
       return event;
+    },
+
+    async listEventsForDocumentSet(input) {
+      return db
+        .select()
+        .from(schema.domainEvents)
+        .where(
+          and(
+            sql`${schema.domainEvents.payload}->>'organizationId' = ${input.organizationId}`,
+            or(
+              and(
+                eq(schema.domainEvents.aggregateType, "document_set"),
+                eq(schema.domainEvents.aggregateId, input.documentSetId)
+              ),
+              sql`${schema.domainEvents.payload}->>'documentSetId' = ${input.documentSetId}`
+            )
+          )
+        )
+        .orderBy(desc(schema.domainEvents.publishedAt), desc(schema.domainEvents.id))
+        .limit(input.limit ?? 100);
     },
 
     async publish(input) {

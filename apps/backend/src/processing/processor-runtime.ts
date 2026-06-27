@@ -57,6 +57,11 @@ export type ProcessorRuntime = {
   runNext(): Promise<"processed" | "idle">;
 };
 
+type ProcessingLogger = {
+  info(input: Record<string, unknown>, message?: string): void;
+  error(input: Record<string, unknown>, message?: string): void;
+};
+
 export function createProcessorRegistry(): ProcessorRegistry {
   const handlers = new Map<string, ProcessorHandler>();
 
@@ -74,6 +79,7 @@ export function createProcessorRegistry(): ProcessorRegistry {
 export function createProcessorRuntime(input: {
   readonly processing: ProcessingRepository;
   readonly registry: ProcessorRegistry;
+  readonly logger?: ProcessingLogger;
 }): ProcessorRuntime {
   return {
     async runNext() {
@@ -81,6 +87,8 @@ export function createProcessorRuntime(input: {
       if (!job) {
         return "idle";
       }
+      const startedAtMs = Date.now();
+      input.logger?.info(jobLogFields(job), "processing job started");
 
       const handler = input.registry.find({
         processorId: job.processorId,
@@ -101,11 +109,26 @@ export function createProcessorRuntime(input: {
             }
           }
         });
+        input.logger?.error(
+          {
+            ...jobLogFields(job),
+            durationMs: Date.now() - startedAtMs,
+            errorCode: "unknown_processor"
+          },
+          "processing job failed"
+        );
         return "processed";
       }
 
       try {
         await handler(job);
+        input.logger?.info(
+          {
+            ...jobLogFields(job),
+            durationMs: Date.now() - startedAtMs
+          },
+          "processing job completed"
+        );
         return "processed";
       } catch (error) {
         const classified = classifyProcessorError(error);
@@ -138,9 +161,32 @@ export function createProcessorRuntime(input: {
             id: job.id
           });
         }
+        input.logger?.error(
+          {
+            ...jobLogFields(job),
+            durationMs: Date.now() - startedAtMs,
+            errorCode: classified.code,
+            retryable: classified.retryable,
+            attempt: job.attempts
+          },
+          "processing job failed"
+        );
         return "processed";
       }
     }
+  };
+}
+
+function jobLogFields(job: ProcessingJob): Record<string, unknown> {
+  return {
+    jobId: job.id,
+    processorId: job.processorId,
+    processorVersion: job.processorVersion,
+    jobType: job.jobType,
+    organizationId: job.organizationId,
+    correlationId: job.correlationId,
+    causationId: job.causationId,
+    attempt: job.attempts
   };
 }
 

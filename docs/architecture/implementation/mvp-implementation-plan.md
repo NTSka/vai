@@ -229,12 +229,12 @@ tasks while preserving the original task as an epic/container.
 
 | ID | Task | Depends on | Result | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| MVP-1301 | Add processing diagnostics API. | MVP-0712, MVP-0801 | Backend diagnostics endpoints. | Maintainer can inspect document set jobs, latest errors, warnings, and related events without database access. |
-| MVP-1302 | Normalize processing warnings. | MVP-0711 | Shared warning codes and shapes. | Baseline results and UI receive stable warning codes, messages, affected document version/job ids, and details. |
+| MVP-1301 | Add processing diagnostics API. | MVP-0712, MVP-0801 | Backend-only diagnostics endpoints. | Maintainer can inspect organization-scoped document set jobs, latest errors, warnings, and related events without database access. Endpoints do not expose cross-organization data. |
+| MVP-1302 | Audit and normalize processing warnings. | MVP-0711, MVP-0801 | Shared warning codes and shapes are consistently used. | Baseline results and UI-visible APIs receive stable warning codes, messages, affected document version/job ids, and details. Existing warning-producing processors are covered by tests or documented follow-up gaps. |
 | MVP-1303 | Add idempotency test suite. | MVP-0607, MVP-0712 | Tests for duplicate events/jobs. | Duplicate delivery does not create duplicate documents, document versions, jobs, nodes, placements, or baseline results. |
-| MVP-1304 | Add event replay smoke test. | MVP-0607, MVP-0712 | Replay validation. | Replaying accepted/document events into a clean projection rebuilds expected derived state or safely no-ops where replay is not supported. |
-| MVP-1305 | Add storage cleanup rules for failed generated artifacts. | MVP-1104, MVP-1111 | Cleanup command or policy. | Failed generated artifacts can be identified and cleaned without deleting original uploads. |
-| MVP-1306 | Add query indexes for MVP read paths. | MVP-0801, MVP-0802, MVP-0803, MVP-0804 | Database indexes. | Upload status, progress, tree, and node document list queries have explicit indexes for organization-scoped access. |
+| MVP-1304 | Add event replay smoke test. | MVP-0607, MVP-0712 | Replay validation. | Replaying accepted/document events into a clean projection rebuilds expected replayable derived state. Consumers that are not replayable safely no-op and document why. |
+| MVP-1305 | Add storage cleanup rules for failed generated artifacts. | MVP-1104, MVP-1111 | Cleanup command or policy. | Failed generated artifacts can be identified and cleaned without deleting original uploads or valid generated artifacts referenced by durable facts. |
+| MVP-1306 | Add query indexes for MVP read paths. | MVP-0801, MVP-0802, MVP-0803, MVP-0804 | Database indexes. | Upload status, progress, tree, and node document list queries have explicit indexes for organization-scoped access and repository tests or query checks cover the expected filters. |
 | MVP-1307 | Add processing observability basics. | MVP-0205, MVP-0608 | Logs and timing fields. | Job start/end/failure logs include job id, processor ref, organization id, correlation id, attempt, and duration. |
 
 ### Phase 14 Tasks: First Business Capability
@@ -784,10 +784,10 @@ Goal: make the MVP reliable enough for repeated local and demo usage.
 
 Tasks:
 
-- Add processing diagnostics views or backend-only diagnostics endpoints.
-- Add structured processing warnings.
-- Add aggregate progress persistence.
-- Add cancellation support if needed for long jobs.
+- Add backend-only processing diagnostics endpoints.
+- Audit and normalize structured processing warnings.
+- Harden aggregate progress projection behavior under retry, failure, and
+  replay.
 - Add idempotency tests for processors and orchestrators.
 - Add event replay smoke tests.
 - Add storage cleanup rules for failed generated artifacts.
@@ -802,11 +802,16 @@ Deliverables:
 - Re-running failed or retried jobs does not duplicate durable facts.
 - Progress remains understandable during partial failure.
 - Common local demo failures are diagnosable.
+- Original uploads are never deleted by generated-artifact cleanup.
 
 Definition of done:
 
 - End-to-end flow passes repeatedly from a clean database.
-- Duplicate event delivery does not create duplicate documents, jobs, or nodes.
+- Duplicate event delivery does not create duplicate documents, document
+  versions, jobs, nodes, placements, or baseline results.
+- Diagnostics endpoints are organization-scoped.
+- UI-visible baseline warnings use stable warning codes and shapes.
+- MVP read paths have explicit organization-scoped indexes.
 
 ## Phase 14: First Business Capability
 

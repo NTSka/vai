@@ -37,6 +37,9 @@ function createEventingDouble(input: {
     async findByTypeAndAggregate() {
       return undefined;
     },
+    async listEventsForDocumentSet() {
+      return [];
+    },
     async publish(event) {
       input.published.push(event);
       return {

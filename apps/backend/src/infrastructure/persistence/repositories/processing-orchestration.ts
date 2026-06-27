@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import * as schema from "../schema/index.js";
 import type { Db } from "./common.js";
@@ -10,6 +10,11 @@ export type ProcessingRepository = {
     readonly organizationId: string;
     readonly id: string;
   }): Promise<typeof schema.processingJobs.$inferSelect | undefined>;
+  listJobsForDocumentSet(input: {
+    readonly organizationId: string;
+    readonly documentSetId: string;
+    readonly limit?: number;
+  }): Promise<ReadonlyArray<typeof schema.processingJobs.$inferSelect>>;
   enqueue(input: {
     readonly organizationId: string;
     readonly processorId: string;
@@ -117,6 +122,20 @@ export function createProcessingRepository(db: Db): ProcessingRepository {
         .limit(1);
 
       return job;
+    },
+
+    async listJobsForDocumentSet(input) {
+      return db
+        .select()
+        .from(schema.processingJobs)
+        .where(
+          and(
+            eq(schema.processingJobs.organizationId, input.organizationId),
+            sql`${schema.processingJobs.payload}->>'documentSetId' = ${input.documentSetId}`
+          )
+        )
+        .orderBy(desc(schema.processingJobs.createdAt), desc(schema.processingJobs.id))
+        .limit(input.limit ?? 100);
     },
 
     async enqueue(input) {

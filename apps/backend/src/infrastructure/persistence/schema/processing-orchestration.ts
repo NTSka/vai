@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 import { timestamps } from "./common.js";
@@ -50,7 +51,16 @@ export const processingJobs = pgTable(
       table.id
     ),
     index("processing_jobs_runnable_idx").on(table.status, table.nextRunAt),
-    index("processing_jobs_organization_idx").on(table.organizationId)
+    index("processing_jobs_organization_idx").on(table.organizationId),
+    index("processing_jobs_org_status_updated_idx").on(
+      table.organizationId,
+      table.status,
+      table.updatedAt
+    ),
+    index("processing_jobs_org_payload_document_set_idx").on(
+      table.organizationId,
+      sql`(${table.payload}->>'documentSetId')`
+    )
   ]
 );
 

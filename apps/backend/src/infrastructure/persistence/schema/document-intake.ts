@@ -78,7 +78,12 @@ export const documentSets = pgTable(
       table.organizationId,
       table.id
     ),
-    index("document_sets_organization_idx").on(table.organizationId)
+    index("document_sets_organization_idx").on(table.organizationId),
+    index("document_sets_org_status_updated_idx").on(
+      table.organizationId,
+      table.status,
+      table.updatedAt
+    )
   ]
 );
 

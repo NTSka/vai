@@ -94,6 +94,12 @@ export const documentVersions = pgTable(
       foreignColumns: [storedFiles.organizationId, storedFiles.id]
     }).onDelete("restrict"),
     index("document_versions_document_set_idx").on(table.documentSetId),
-    index("document_versions_organization_idx").on(table.organizationId)
+    index("document_versions_organization_idx").on(table.organizationId),
+    index("document_versions_org_status_idx").on(table.organizationId, table.status),
+    index("document_versions_org_set_status_idx").on(
+      table.organizationId,
+      table.documentSetId,
+      table.status
+    )
   ]
 );

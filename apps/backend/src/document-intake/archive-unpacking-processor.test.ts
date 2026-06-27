@@ -158,6 +158,9 @@ function createArchiveFixture(input: {
         updatedAt: new Date()
       };
     },
+    async listJobsForDocumentSet() {
+      return [];
+    },
     async enqueue() {
       throw new Error("not used");
     },

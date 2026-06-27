@@ -1381,7 +1381,10 @@ describe("Phase 8 backend read APIs", () => {
         drizzle: database
       },
       objectStorage: createObjectStorageDouble("pdf-content"),
-      auth: createReadApiAuthOptions(context.organization.id)
+      auth: createReadApiAuthOptions(context.organization.id, [
+        "document.view",
+        "processing_diagnostics.view"
+      ])
     });
     const cookie = `vai_access_token=${createReadApiJwt().issuePair("read-api-user").accessToken}`;
 
@@ -1397,6 +1400,22 @@ describe("Phase 8 backend read APIs", () => {
       intakeStatus: "accepted",
       baselineStatus: "completed_with_warnings",
       warnings: [{ code: "fixture_warning" }]
+    });
+
+    const diagnostics = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/processing/diagnostics/document-sets/${context.documentSet.id}`,
+      headers: { cookie }
+    });
+    expect(diagnostics.statusCode).toBe(200);
+    expect(diagnostics.json()).toMatchObject({
+      organizationId: context.organization.id,
+      documentSetId: context.documentSet.id,
+      documentSetStatus: "accepted",
+      baselineStatus: "completed_with_warnings",
+      warnings: [{ code: "fixture_warning" }],
+      jobs: [expect.objectContaining({ id: context.job.id })],
+      events: [expect.objectContaining({ type: "document_set.accepted" })]
     });
 
     const tree = await app.inject({
@@ -1597,6 +1616,39 @@ describe("Phase 4 seed", () => {
         )
       )
     ).toBe(4);
+    const roles = await database
+      .select()
+      .from(schema.roles)
+      .where(
+        and(
+          isNull(schema.roles.organizationId),
+          eq(schema.roles.scope, "system"),
+          inArray(schema.roles.name, [
+            "organization_owner",
+            "organization_admin",
+            "organization_member",
+            "organization_viewer"
+          ])
+        )
+      );
+    expect(
+      roles
+        .filter((role) =>
+          ["organization_owner", "organization_admin"].includes(role.name)
+        )
+        .every((role) =>
+          role.permissionKeys.includes("processing_diagnostics.view")
+        )
+    ).toBe(true);
+    expect(
+      roles
+        .filter((role) =>
+          ["organization_member", "organization_viewer"].includes(role.name)
+        )
+        .every(
+          (role) => !role.permissionKeys.includes("processing_diagnostics.view")
+        )
+    ).toBe(true);
     expect(
       await countRows(
         database,
@@ -1747,6 +1799,7 @@ async function createReadApiHttpFixture(database: TestDb) {
   const context = await createRegisteredDocumentContext(database);
   const registry = createDocumentRegistryRepository(database);
   const processing = createProcessingRepository(database);
+  const eventing = createEventingRepository(database);
   const baselineFacts = createBaselineFactsRepository(database);
   const projectStructure = createProjectStructureRepository(database);
   const baselineProcessing = createBaselineProcessingRepository(database);
@@ -1765,7 +1818,19 @@ async function createReadApiHttpFixture(database: TestDb) {
     processorId: "fixture",
     processorVersion: "1.0.0",
     jobType: "fixture",
-    payload: {}
+    payload: { documentSetId: context.documentSet.id }
+  });
+  await eventing.publish({
+    type: "document_set.accepted",
+    version: "1",
+    source: "fixture",
+    aggregateType: "document_set",
+    aggregateId: context.documentSet.id,
+    payload: {
+      organizationId: context.organization.id,
+      documentSetId: context.documentSet.id
+    },
+    correlationId: "fixture-correlation"
   });
   await baselineFacts.upsertDocumentTypeResolution({
     organizationId: context.organization.id,
@@ -1830,10 +1895,13 @@ async function createReadApiHttpFixture(database: TestDb) {
     warnings: [{ code: "fixture_warning", message: "Fixture warning" }]
   });
 
-  return { ...context, identity, node, placement };
+  return { ...context, identity, node, placement, job };
 }
 
-function createReadApiAuthOptions(organizationId: string) {
+function createReadApiAuthOptions(
+  organizationId: string,
+  permissionKeys: readonly string[] = ["document.view"]
+) {
   const session: AuthSession = {
     user: {
       id: "read-api-user",
@@ -1846,7 +1914,7 @@ function createReadApiAuthOptions(organizationId: string) {
         name: "Read API Organization",
         membershipId: "read-api-membership",
         roleIds: ["read-api-role"],
-        permissionKeys: ["document.view"]
+        permissionKeys: [...permissionKeys]
       }
     ]
   };

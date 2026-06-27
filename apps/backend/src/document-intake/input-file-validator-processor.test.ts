@@ -240,6 +240,9 @@ function createProcessorFixture(
         updatedAt: new Date()
       };
     },
+    async listJobsForDocumentSet() {
+      return [];
+    },
     async enqueue() {
       throw new Error("not used");
     },
@@ -431,6 +434,9 @@ function createProcessorFixture(
           event.aggregateType === input.aggregateType &&
           event.aggregateId === input.aggregateId
       ) as never;
+    },
+    async listEventsForDocumentSet() {
+      return [];
     },
     async publish(input) {
       events.push(input);

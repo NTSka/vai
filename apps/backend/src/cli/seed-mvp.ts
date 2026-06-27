@@ -20,16 +20,21 @@ const defaultPermissions = [
   "processing_progress.view"
 ];
 
+const maintainerPermissions = [
+  ...defaultPermissions,
+  "processing_diagnostics.view"
+];
+
 const systemRoles = [
   {
     name: "organization_owner",
     description: "Seeded MVP organization owner",
-    permissionKeys: defaultPermissions
+    permissionKeys: maintainerPermissions
   },
   {
     name: "organization_admin",
     description: "Seeded MVP organization admin",
-    permissionKeys: defaultPermissions
+    permissionKeys: maintainerPermissions
   },
   {
     name: "organization_member",

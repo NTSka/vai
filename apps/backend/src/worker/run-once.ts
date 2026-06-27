@@ -150,7 +150,14 @@ function createRuntime(
       })
   });
 
-  const processorRuntime = createProcessorRuntime({ processing, registry });
+  const processorRuntime = createProcessorRuntime({
+    processing,
+    registry,
+    logger: {
+      info: (fields, message) => console.info(message, fields),
+      error: (fields, message) => console.error(message, fields)
+    }
+  });
 
   return {
     async runNext() {

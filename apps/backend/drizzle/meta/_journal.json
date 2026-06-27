@@ -43,6 +43,13 @@
       "when": 1782598309668,
       "tag": "0005_phase12_semantic_enums",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782602696555,
+      "tag": "0006_curious_calypso",
+      "breakpoints": true
     }
   ]
 }

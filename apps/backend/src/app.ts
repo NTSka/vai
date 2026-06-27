@@ -30,6 +30,7 @@ import {
   type RegisterDocumentIntakeRoutesOptions
 } from "./http/routes/document-intake.js";
 import { registerHealthRoutes } from "./http/routes/health.js";
+import { registerProcessingDiagnosticsRoutes } from "./http/routes/processing-diagnostics.js";
 import { registerProcessingProgressRoutes } from "./http/routes/processing-progress.js";
 
 export type BuildAppOptions = {
@@ -105,6 +106,7 @@ export async function buildApp(
   await registerAuthRoutes(app);
   await registerDocumentIntakeRoutes(app, options.documentIntake);
   await registerProcessingProgressRoutes(app);
+  await registerProcessingDiagnosticsRoutes(app);
   await registerBackendReadApiRoutes(app);
 
   return app;

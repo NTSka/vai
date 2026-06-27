@@ -192,6 +192,8 @@ describe("backend app", () => {
         "/health/ready": {},
         "/organizations/{organizationId}/document-sets/{documentSetId}/status": {},
         "/organizations/{organizationId}/processing/progress": {},
+        "/organizations/{organizationId}/processing/diagnostics/document-sets/{documentSetId}":
+          {},
         "/organizations/{organizationId}/project-structure/tree": {},
         "/organizations/{organizationId}/project-structure/nodes/{nodeId}/documents": {},
         "/organizations/{organizationId}/source-documents/{documentVersionId}": {},
@@ -263,6 +265,56 @@ describe("backend app", () => {
       error: {
         code: "forbidden",
         message: "Organization membership is required"
+      }
+    });
+
+    await app.close();
+  });
+
+  it("rejects processing diagnostics for regular document viewers", async () => {
+    const viewerSession: AuthSession = {
+      ...testSession,
+      organizations: [
+        {
+          ...testSession.organizations[0]!,
+          roleIds: ["viewer-role"],
+          permissionKeys: ["document.view"]
+        }
+      ]
+    };
+    const viewerAuthService: AuthService = {
+      async login() {
+        return viewerSession;
+      },
+      async loadSession(input) {
+        return input.userId === viewerSession.user.id ? viewerSession : undefined;
+      }
+    };
+    const jwtIssuer = createTestJwtIssuer();
+    const tokens = jwtIssuer.issuePair(viewerSession.user.id);
+    const app = await buildApp({
+      config: createTestConfig(),
+      logger: false,
+      database: healthyDatabase,
+      objectStorage: healthyObjectStorage,
+      auth: {
+        authService: viewerAuthService,
+        jwtIssuer
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/organizations/${viewerSession.organizations[0]?.id}/processing/diagnostics/document-sets/document-set-1`,
+      headers: {
+        cookie: `vai_access_token=${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "forbidden"
       }
     });
 

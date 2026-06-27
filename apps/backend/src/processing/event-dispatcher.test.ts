@@ -103,6 +103,9 @@ function createDispatcherFixture(
     async findByTypeAndAggregate() {
       return undefined;
     },
+    async listEventsForDocumentSet() {
+      return [event];
+    },
     async publish() {
       throw new Error("not used");
     },

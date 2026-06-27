@@ -116,6 +116,10 @@ export const projectStructurePlacements = pgTable(
       columns: [table.organizationId, table.producedByJobId],
       foreignColumns: [processingJobs.organizationId, processingJobs.id]
     }),
-    index("project_structure_placements_node_idx").on(table.organizationId, table.nodeId)
+    index("project_structure_placements_node_idx").on(table.organizationId, table.nodeId),
+    index("project_structure_placements_org_status_idx").on(
+      table.organizationId,
+      table.status
+    )
   ]
 );

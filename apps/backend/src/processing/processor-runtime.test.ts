@@ -31,6 +31,56 @@ describe("processor runtime", () => {
     expect(fixture.statuses).toEqual(["completed"]);
   });
 
+  it("logs processor timing and correlation fields", async () => {
+    const logs: Array<{ level: string; fields: Record<string, unknown>; message?: string }> =
+      [];
+    const fixture = createRuntimeFixture({
+      logger: {
+        info(fields, message) {
+          logs.push({ level: "info", fields, ...(message ? { message } : {}) });
+        },
+        error(fields, message) {
+          logs.push({ level: "error", fields, ...(message ? { message } : {}) });
+        }
+      }
+    });
+
+    fixture.registry.register({
+      processorId: "fixture_processor",
+      jobType: "fixture_job",
+      handler: async (job) => {
+        await fixture.processing.completeJob({
+          organizationId: job.organizationId,
+          id: job.id
+        });
+      }
+    });
+
+    expect(await fixture.runtime.runNext()).toBe("processed");
+    expect(logs).toEqual([
+      {
+        level: "info",
+        message: "processing job started",
+        fields: expect.objectContaining({
+          jobId: "job-1",
+          processorId: "fixture_processor",
+          organizationId: "organization-1",
+          correlationId: "correlation-1",
+          causationId: "causation-1",
+          attempt: 0
+        })
+      },
+      {
+        level: "info",
+        message: "processing job completed",
+        fields: expect.objectContaining({
+          jobId: "job-1",
+          durationMs: expect.any(Number)
+        })
+      }
+    ]);
+  });
+
   it("fails unknown processors with a structured error", async () => {
     const fixture = createRuntimeFixture();
 
@@ -94,7 +144,11 @@ describe("processor runtime", () => {
   });
 });
 
-function createRuntimeFixture() {
+function createRuntimeFixture(
+  overrides: Partial<{
+    readonly logger: Parameters<typeof createProcessorRuntime>[0]["logger"];
+  }> = {}
+) {
   const statuses: string[] = [];
   const errors: unknown[] = [];
   const job = {
@@ -112,8 +166,8 @@ function createRuntimeFixture() {
     attempts: 0,
     maxAttempts: 3,
     nextRunAt: null,
-    correlationId: null,
-    causationId: null,
+    correlationId: "correlation-1",
+    causationId: "causation-1",
     createdAt: new Date(),
     updatedAt: new Date()
   };
@@ -128,6 +182,9 @@ function createRuntimeFixture() {
     },
     async findJob() {
       return job;
+    },
+    async listJobsForDocumentSet() {
+      return [job];
     },
     async enqueue() {
       throw new Error("not used");
@@ -164,7 +221,11 @@ function createRuntimeFixture() {
 
   return {
     registry,
-    runtime: createProcessorRuntime({ processing, registry }),
+    runtime: createProcessorRuntime({
+      processing,
+      registry,
+      ...(overrides.logger ? { logger: overrides.logger } : {})
+    }),
     processing,
     statuses,
     errors

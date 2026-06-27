@@ -491,6 +491,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/organizations/{organizationId}/processing/diagnostics/document-sets/{documentSetId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Inspect processing jobs, warnings, and related events for a document set. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    organizationId: string;
+                    documentSetId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            organizationId: string;
+                            documentSetId: string;
+                            /** @enum {string} */
+                            documentSetStatus: "uploaded" | "intake_processing" | "accepted" | "failed";
+                            /**
+                             * @default not_started
+                             * @enum {string}
+                             */
+                            baselineStatus: "not_started" | "processing" | "completed" | "completed_with_warnings" | "failed";
+                            warnings: {
+                                code: string;
+                                message: string;
+                                documentVersionId?: string;
+                                processingJobId?: string;
+                                details?: {
+                                    [key: string]: unknown;
+                                };
+                            }[];
+                            jobs: {
+                                id: string;
+                                processorId: string;
+                                processorVersion: string;
+                                jobType: string;
+                                /** @enum {string} */
+                                status: "pending" | "queued" | "running" | "completed" | "failed" | "cancelled";
+                                attempts: number;
+                                maxAttempts: number;
+                                scheduledAt: string | (null);
+                                startedAt: string | (null);
+                                completedAt: string | (null);
+                                nextRunAt: string | (null);
+                                correlationId: string | (null);
+                                causationId: string | (null);
+                                error: {
+                                    code: string;
+                                    message: string;
+                                    details?: {
+                                        [key: string]: unknown;
+                                    };
+                                } | (null);
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                updatedAt: string;
+                            }[];
+                            events: {
+                                id: string;
+                                type: string;
+                                version: string;
+                                source: string;
+                                aggregateType: string;
+                                aggregateId: string;
+                                correlationId: string | (null);
+                                causationId: string | (null);
+                                /** Format: date-time */
+                                occurredAt: string;
+                                /** Format: date-time */
+                                publishedAt: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/organizations/{organizationId}/document-sets/{documentSetId}/status": {
         parameters: {
             query?: never;
