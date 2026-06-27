@@ -43,6 +43,29 @@ Deferred to Phase 11:
 - table reconstruction;
 - render cache and generated-artifact object storage.
 
+## Phase 11 Baseline Adaptation
+
+The Phase 11 service contract now exposes content-level technical operations:
+
+- PDF layout detection returns `region`-shaped outputs such as text blocks,
+  drawing area bounds, stamp candidates, and table candidates.
+- OCR candidate planning returns `ocr_candidate` outputs only. It must not
+  produce document-code candidates, parsed GOST identities, or typed document
+  fields.
+- Targeted OCR first resolves candidates from the PDF text layer when possible.
+  Tesseract is used only for unresolved candidate crops. Full-page OCR is not a
+  default path.
+- PDF table reconstruction returns baseline table/cell artifacts with source
+  region ids, row/column indexes, text, confidence, and locations.
+
+The current service implementation adapts the old processor's separation of
+layout planning, OCR candidate planning, targeted OCR, and table reconstruction,
+but intentionally omits old product-shaped extracted unit hierarchy and project
+node/root unit request fields. The heavier OpenCV table/stamp detector from the
+old processor remains the reference implementation for later refinement; the
+initial baseline keeps the gRPC boundary executable and fixture-tested before
+backend artifact persistence is wired in.
+
 Discarded from the new service boundary:
 
 - old `StructuralExtractionService`;

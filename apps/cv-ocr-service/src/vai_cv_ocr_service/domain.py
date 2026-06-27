@@ -89,3 +89,71 @@ class RenderedPdfPage:
     sha256: str
     size_bytes: int
     content: bytes
+
+
+@dataclass(frozen=True)
+class ContentLocation:
+    page_number: int
+    bbox: BoundingBox
+
+
+@dataclass(frozen=True)
+class LayoutRegion:
+    local_id: str
+    region_kind: str
+    location: ContentLocation
+    confidence: float
+    source: str
+    metadata_json: str = ""
+
+
+@dataclass(frozen=True)
+class OcrCandidate:
+    local_id: str
+    target_kind: str
+    source_region_id: str
+    location: ContentLocation
+    expected_value_kind: str = ""
+    metadata_json: str = ""
+
+
+@dataclass(frozen=True)
+class OcrText:
+    local_id: str
+    source_candidate_id: str
+    text: str
+    confidence: float
+    engine: str
+    engine_version: str
+
+
+@dataclass(frozen=True)
+class TableCell:
+    row_index: int
+    column_index: int
+    text: str
+    location: ContentLocation
+    confidence: float
+    row_span: int = 1
+    column_span: int = 1
+    raw_text: str = ""
+    source_candidate_ids: tuple[str, ...] = field(default_factory=tuple)
+    selected_candidate_id: str = ""
+    ocr_quality_status: str = ""
+    quality_flags: tuple[str, ...] = field(default_factory=tuple)
+    metadata_json: str = ""
+
+
+@dataclass(frozen=True)
+class TableArtifact:
+    local_id: str
+    source_region_id: str
+    rows: tuple[tuple[TableCell, ...], ...]
+    source_region_ids: tuple[str, ...] = field(default_factory=tuple)
+    coverage_policy: str = ""
+    quality_flags: tuple[str, ...] = field(default_factory=tuple)
+    missing_ocr_candidate_count: int = 0
+    missing_ocr_text_count: int = 0
+    low_confidence_ocr_count: int = 0
+    empty_ocr_text_count: int = 0
+    metadata_json: str = ""

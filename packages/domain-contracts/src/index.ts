@@ -107,3 +107,101 @@ export type PdfRenderResult = {
   readonly pages: readonly PdfRenderedPage[];
   readonly diagnostics: readonly ProcessingDiagnostic[];
 };
+
+export type ContentLocation = {
+  readonly bbox: ContentBoundingBox;
+};
+
+export type PdfLayoutRegionKind =
+  | "drawing_area"
+  | "stamp_candidate"
+  | "table_candidate"
+  | "text_block"
+  | "other";
+
+export type PdfLayoutRegion = {
+  readonly localId: string;
+  readonly regionKind: PdfLayoutRegionKind;
+  readonly location: ContentLocation;
+  readonly confidence: number;
+  readonly source: string;
+  readonly metadataJson?: string;
+};
+
+export type PdfLayoutResult = {
+  readonly adapter: FileTechnicalAdapterRef;
+  readonly regions: readonly PdfLayoutRegion[];
+  readonly diagnostics: readonly ProcessingDiagnostic[];
+};
+
+export type OcrTargetKind =
+  | "stamp_field"
+  | "table_cell"
+  | "text_region"
+  | "other";
+
+export type OcrCandidate = {
+  readonly localId: string;
+  readonly targetKind: OcrTargetKind;
+  readonly sourceRegionId: string;
+  readonly location: ContentLocation;
+  readonly expectedValueKind?: string;
+  readonly metadataJson?: string;
+};
+
+export type OcrCandidatePlanResult = {
+  readonly adapter: FileTechnicalAdapterRef;
+  readonly candidates: readonly OcrCandidate[];
+  readonly diagnostics: readonly ProcessingDiagnostic[];
+};
+
+export type OcrText = {
+  readonly localId: string;
+  readonly sourceCandidateId: string;
+  readonly text: string;
+  readonly confidence: number;
+  readonly engine: string;
+  readonly engineVersion: string;
+};
+
+export type TargetedOcrResult = {
+  readonly adapter: FileTechnicalAdapterRef;
+  readonly texts: readonly OcrText[];
+  readonly diagnostics: readonly ProcessingDiagnostic[];
+};
+
+export type TableCellArtifact = {
+  readonly rowIndex: number;
+  readonly columnIndex: number;
+  readonly text: string;
+  readonly location: ContentLocation;
+  readonly confidence: number;
+  readonly rowSpan: number;
+  readonly columnSpan: number;
+  readonly rawText?: string;
+  readonly sourceCandidateIds: readonly string[];
+  readonly selectedCandidateId?: string;
+  readonly ocrQualityStatus?: string;
+  readonly qualityFlags: readonly string[];
+  readonly metadataJson?: string;
+};
+
+export type PdfTableArtifact = {
+  readonly localId: string;
+  readonly sourceRegionId: string;
+  readonly sourceRegionIds: readonly string[];
+  readonly rows: readonly (readonly TableCellArtifact[])[];
+  readonly coveragePolicy?: string;
+  readonly qualityFlags: readonly string[];
+  readonly missingOcrCandidateCount: number;
+  readonly missingOcrTextCount: number;
+  readonly lowConfidenceOcrCount: number;
+  readonly emptyOcrTextCount: number;
+  readonly metadataJson?: string;
+};
+
+export type PdfTableReconstructionResult = {
+  readonly adapter: FileTechnicalAdapterRef;
+  readonly tables: readonly PdfTableArtifact[];
+  readonly diagnostics: readonly ProcessingDiagnostic[];
+};

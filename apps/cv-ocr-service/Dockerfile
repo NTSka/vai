@@ -5,6 +5,13 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-rus \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY apps/cv-ocr-service/pyproject.toml ./apps/cv-ocr-service/pyproject.toml
 COPY apps/cv-ocr-service/src ./apps/cv-ocr-service/src
 COPY apps/cv-ocr-service/scripts ./apps/cv-ocr-service/scripts

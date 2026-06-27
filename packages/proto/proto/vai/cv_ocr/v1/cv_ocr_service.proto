@@ -7,6 +7,10 @@ service CvOcrService {
   rpc ExtractPdfMetadata(ExtractPdfMetadataRequest) returns (ExtractPdfMetadataResponse);
   rpc ExtractPdfTextLayer(ExtractPdfTextLayerRequest) returns (ExtractPdfTextLayerResponse);
   rpc RenderPdfPages(RenderPdfPagesRequest) returns (RenderPdfPagesResponse);
+  rpc DetectPdfLayout(DetectPdfLayoutRequest) returns (DetectPdfLayoutResponse);
+  rpc PlanPdfOcrCandidates(PlanPdfOcrCandidatesRequest) returns (PlanPdfOcrCandidatesResponse);
+  rpc RunPdfTargetedOcr(RunPdfTargetedOcrRequest) returns (RunPdfTargetedOcrResponse);
+  rpc ReconstructPdfTables(ReconstructPdfTablesRequest) returns (ReconstructPdfTablesResponse);
 }
 
 message CheckHealthRequest {}
@@ -130,5 +134,122 @@ message RenderPdfPagesResponse {
   string adapter_id = 1;
   string adapter_version = 2;
   repeated RenderedPdfPage pages = 3;
+  repeated Diagnostic diagnostics = 4;
+}
+
+message ContentLocation {
+  BoundingBox bbox = 1;
+}
+
+message PdfLayoutRegion {
+  string local_id = 1;
+  string region_kind = 2;
+  ContentLocation location = 3;
+  double confidence = 4;
+  string source = 5;
+  string metadata_json = 6;
+}
+
+message DetectPdfLayoutRequest {
+  repeated RenderedPdfPage rendered_pages = 1;
+  repeated PdfTextPage text_pages = 2;
+}
+
+message DetectPdfLayoutResponse {
+  string adapter_id = 1;
+  string adapter_version = 2;
+  repeated PdfLayoutRegion regions = 3;
+  repeated Diagnostic diagnostics = 4;
+}
+
+message OcrCandidate {
+  string local_id = 1;
+  string target_kind = 2;
+  string source_region_id = 3;
+  ContentLocation location = 4;
+  string expected_value_kind = 5;
+  string metadata_json = 6;
+}
+
+message PlanPdfOcrCandidatesRequest {
+  repeated PdfLayoutRegion regions = 1;
+  repeated RenderedPdfPage rendered_pages = 2;
+}
+
+message PlanPdfOcrCandidatesResponse {
+  string adapter_id = 1;
+  string adapter_version = 2;
+  repeated OcrCandidate candidates = 3;
+  repeated Diagnostic diagnostics = 4;
+}
+
+message OcrText {
+  string local_id = 1;
+  string source_candidate_id = 2;
+  string text = 3;
+  double confidence = 4;
+  string engine = 5;
+  string engine_version = 6;
+}
+
+message RunPdfTargetedOcrRequest {
+  repeated RenderedPdfPage rendered_pages = 1;
+  repeated OcrCandidate candidates = 2;
+  repeated PdfTextPage text_pages = 3;
+  string tesseract_binary = 4;
+}
+
+message RunPdfTargetedOcrResponse {
+  string adapter_id = 1;
+  string adapter_version = 2;
+  repeated OcrText texts = 3;
+  repeated Diagnostic diagnostics = 4;
+}
+
+message TableCell {
+  int32 row_index = 1;
+  int32 column_index = 2;
+  string text = 3;
+  ContentLocation location = 4;
+  double confidence = 5;
+  int32 row_span = 6;
+  int32 column_span = 7;
+  string raw_text = 8;
+  repeated string source_candidate_ids = 9;
+  string selected_candidate_id = 10;
+  string ocr_quality_status = 11;
+  repeated string quality_flags = 12;
+  string metadata_json = 13;
+}
+
+message TableRow {
+  repeated TableCell cells = 1;
+}
+
+message PdfTableArtifact {
+  string local_id = 1;
+  string source_region_id = 2;
+  repeated TableRow rows = 3;
+  repeated string source_region_ids = 4;
+  string coverage_policy = 5;
+  repeated string quality_flags = 6;
+  int32 missing_ocr_candidate_count = 7;
+  int32 missing_ocr_text_count = 8;
+  int32 low_confidence_ocr_count = 9;
+  int32 empty_ocr_text_count = 10;
+  string metadata_json = 11;
+}
+
+message ReconstructPdfTablesRequest {
+  repeated PdfLayoutRegion regions = 1;
+  repeated OcrText ocr_texts = 2;
+  repeated OcrCandidate candidates = 3;
+  repeated RenderedPdfPage rendered_pages = 4;
+}
+
+message ReconstructPdfTablesResponse {
+  string adapter_id = 1;
+  string adapter_version = 2;
+  repeated PdfTableArtifact tables = 3;
   repeated Diagnostic diagnostics = 4;
 }
