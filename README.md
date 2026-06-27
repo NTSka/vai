@@ -77,6 +77,15 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
+API contract generation is wired through the backend OpenAPI exporter:
+
+```bash
+pnpm api:generate
+```
+
+The command writes `packages/api-contracts/openapi.json` and regenerates the
+web OpenAPI types in `apps/web/src/lib/api/generated/openapi.ts`.
+
 `pnpm db:seed` creates or updates the MVP user, password credential,
 organization, initial system roles, and owner membership. Override
 `MVP_SEED_EMAIL`, `MVP_SEED_PASSWORD`, `MVP_SEED_FULL_NAME`, or
@@ -101,7 +110,8 @@ Use the PostgreSQL port from `.env` or your Compose override.
 
 ## Apps
 
-- `apps/web`: SvelteKit frontend, planned for Phase 9.
+- `apps/web`: SvelteKit frontend for login, upload, progress, project tree,
+  document list, and source file actions.
 - `apps/backend`: Fastify backend modular monolith.
 - `apps/worker`: TypeScript background worker runtime.
 - `apps/cv-ocr-service`: Python CV/OCR gRPC service, planned for Phase 10.

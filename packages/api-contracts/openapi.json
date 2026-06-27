@@ -1,0 +1,1453 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "VAI Backend API",
+    "version": "0.0.0"
+  },
+  "components": {
+    "schemas": {}
+  },
+  "paths": {
+    "/openapi.json": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded"
+                      ]
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "unreachable",
+                                "unauthorized",
+                                "timeout"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "ok"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "objectStorage": {
+                          "type": "object",
+                          "properties": {
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "unreachable",
+                                "unauthorized",
+                                "timeout"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "ok"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "database",
+                        "objectStorage"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "checks"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded"
+                      ]
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "unreachable",
+                                "unauthorized",
+                                "timeout"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "ok"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "objectStorage": {
+                          "type": "object",
+                          "properties": {
+                            "ok": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "unreachable",
+                                "unauthorized",
+                                "timeout"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "ok"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "database",
+                        "objectStorage"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "checks"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "login": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "login",
+                  "password"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "fullName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "email",
+                        "fullName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "organizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "membershipId": {
+                            "type": "string"
+                          },
+                          "roleIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "permissionKeys": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "membershipId",
+                          "roleIds",
+                          "permissionKeys"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "user",
+                    "organizations"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "fullName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "email",
+                        "fullName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "organizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "membershipId": {
+                            "type": "string"
+                          },
+                          "roleIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "permissionKeys": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "membershipId",
+                          "roleIds",
+                          "permissionKeys"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "user",
+                    "organizations"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/auth/test/protected": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "userId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/test/organization": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "membershipId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "membershipId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/test/permission": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/document-sets/uploads": {
+      "post": {
+        "tags": [
+          "document-intake"
+        ],
+        "description": "Upload one or more original files into a document set.",
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "documentSetId": {
+                      "type": "string"
+                    },
+                    "storedFileIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "validationJobId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "uploaded"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "documentSetId",
+                    "storedFileIds",
+                    "validationJobId",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/processing/progress": {
+      "get": {
+        "tags": [
+          "processing"
+        ],
+        "description": "Read aggregate processing progress for an organization.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "totalDocumentVersions": {
+                      "type": "number"
+                    },
+                    "completedDocumentVersions": {
+                      "type": "number"
+                    },
+                    "failedDocumentVersions": {
+                      "type": "number"
+                    },
+                    "processingDocumentVersions": {
+                      "type": "number"
+                    },
+                    "totalJobs": {
+                      "type": "number"
+                    },
+                    "completedJobs": {
+                      "type": "number"
+                    },
+                    "failedJobs": {
+                      "type": "number"
+                    },
+                    "runningJobs": {
+                      "type": "number"
+                    },
+                    "percent": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "totalDocumentVersions",
+                    "completedDocumentVersions",
+                    "failedDocumentVersions",
+                    "processingDocumentVersions",
+                    "totalJobs",
+                    "completedJobs",
+                    "failedJobs",
+                    "runningJobs",
+                    "percent",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/document-sets/{documentSetId}/status": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Read intake and baseline status for one document set.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "documentSetId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "documentSetId": {
+                      "type": "string"
+                    },
+                    "intakeStatus": {
+                      "type": "string",
+                      "enum": [
+                        "uploaded",
+                        "intake_processing",
+                        "accepted",
+                        "failed"
+                      ]
+                    },
+                    "baselineStatus": {
+                      "default": "not_started",
+                      "type": "string",
+                      "enum": [
+                        "not_started",
+                        "processing",
+                        "completed",
+                        "completed_with_warnings",
+                        "failed"
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "documentVersionId": {
+                            "type": "string"
+                          },
+                          "processingJobId": {
+                            "type": "string"
+                          },
+                          "details": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "baselineUpdatedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "nullable": true,
+                          "enum": [
+                            null
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "documentSetId",
+                    "intakeStatus",
+                    "baselineStatus",
+                    "warnings",
+                    "createdAt",
+                    "updatedAt",
+                    "baselineUpdatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/project-structure/tree": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Read the organization project structure tree.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "parentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "subject": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "documentCount": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "parentId",
+                          "kind",
+                          "key",
+                          "title",
+                          "subject",
+                          "documentCount",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "fallbackGroups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "enum": [
+                              "unplaced",
+                              "unsupported"
+                            ]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "documentCount": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title",
+                          "documentCount"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "nodes",
+                    "fallbackGroups"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/project-structure/nodes/{nodeId}/documents": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Read documents attached to a project structure node.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "nodeId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "nodeId": {
+                      "type": "string"
+                    },
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "documentId": {
+                            "type": "string"
+                          },
+                          "documentVersionId": {
+                            "type": "string"
+                          },
+                          "sourceFileName": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "registered",
+                              "processing",
+                              "ready",
+                              "failed",
+                              "unsupported"
+                            ]
+                          },
+                          "placementStatus": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "placed",
+                                  "ambiguous",
+                                  "unplaced"
+                                ]
+                              },
+                              {
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "typeResolution": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "family": {
+                                    "type": "string",
+                                    "enum": [
+                                      "estimate",
+                                      "drawing",
+                                      "unknown"
+                                    ]
+                                  },
+                                  "confidence": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "family",
+                                  "confidence"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "documentId",
+                          "documentVersionId",
+                          "sourceFileName",
+                          "status",
+                          "placementStatus",
+                          "typeResolution"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "nodeId",
+                    "documents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/source-documents/{documentVersionId}": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Read source document metadata and available actions.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "documentVersionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    },
+                    "documentVersionId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "registered",
+                        "processing",
+                        "ready",
+                        "failed",
+                        "unsupported"
+                      ]
+                    },
+                    "sourceFile": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "originalName": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "nullable": true,
+                              "enum": [
+                                null
+                              ]
+                            }
+                          ]
+                        },
+                        "extension": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "nullable": true,
+                              "enum": [
+                                null
+                              ]
+                            }
+                          ]
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        },
+                        "checksum": {
+                          "type": "string"
+                        },
+                        "checksumAlgorithm": {
+                          "type": "string",
+                          "enum": [
+                            "sha256"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "originalName",
+                        "mimeType",
+                        "extension",
+                        "sizeBytes",
+                        "checksum",
+                        "checksumAlgorithm",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "actions": {
+                      "type": "object",
+                      "properties": {
+                        "view": {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "url": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "nullable": true,
+                                  "enum": [
+                                    null
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "url"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "download": {
+                          "type": "object",
+                          "properties": {
+                            "available": {
+                              "type": "boolean"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "available",
+                            "url"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "view",
+                        "download"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "documentId",
+                    "documentVersionId",
+                    "status",
+                    "sourceFile",
+                    "actions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/source-documents/{documentVersionId}/access": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Read proxied source document view/download URLs.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "documentVersionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "documentVersionId": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "proxied"
+                      ]
+                    },
+                    "viewUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "nullable": true,
+                          "enum": [
+                            null
+                          ]
+                        }
+                      ]
+                    },
+                    "downloadUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "documentVersionId",
+                    "mode",
+                    "viewUrl",
+                    "downloadUrl"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/source-documents/{documentVersionId}/content": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Proxy source document content after organization authorization.",
+        "parameters": [
+          {
+            "schema": {
+              "default": "attachment",
+              "type": "string",
+              "enum": [
+                "inline",
+                "attachment"
+              ]
+            },
+            "in": "query",
+            "name": "disposition",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "documentVersionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary source document stream.",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/document-versions/{documentVersionId}/typed-data": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Read placeholder typed document data for a document version.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "documentVersionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "documentVersionId": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "available",
+                        "not_available"
+                      ]
+                    },
+                    "records": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "family": {
+                            "type": "string",
+                            "enum": [
+                              "estimate",
+                              "drawing",
+                              "unknown"
+                            ]
+                          },
+                          "data": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "producedByJobId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "family",
+                          "data",
+                          "producedByJobId",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "documentVersionId",
+                    "state",
+                    "records"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

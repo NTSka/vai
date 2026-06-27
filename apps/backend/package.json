@@ -16,6 +16,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "pnpm build && node --env-file-if-exists=.env --enable-source-maps dist/cli/seed-mvp.js",
+    "openapi:export": "pnpm build && node --enable-source-maps dist/cli/export-openapi.js",
     "health:check": "pnpm build && node --enable-source-maps dist/cli/health-check.js",
     "test": "vitest run",
     "test:db": "node -e \"if (!process.env.TEST_DATABASE_URL) { console.error('TEST_DATABASE_URL is required for backend DB tests'); process.exit(1); }\" && vitest run src/infrastructure/persistence/repositories.test.ts",

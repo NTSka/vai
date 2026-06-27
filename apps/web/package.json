@@ -4,11 +4,31 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "echo \"web app is planned for Phase 9\"",
-    "build": "echo \"web app is planned for Phase 9\"",
-    "typecheck": "echo \"web app is planned for Phase 9\"",
-    "test": "echo \"web tests are not implemented yet\"",
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
     "lint": "echo \"web lint is not configured yet\"",
     "format": "echo \"web format is not configured yet\""
+  },
+  "dependencies": {
+    "@lucide/svelte": "^1.21.0",
+    "@sveltejs/adapter-auto": "^7.0.1",
+    "@sveltejs/kit": "^2.68.0",
+    "bits-ui": "^2.18.1",
+    "clsx": "^2.1.1",
+    "svelte": "^5.56.4",
+    "vite": "^8.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "autoprefixer": "^10.5.2",
+    "postcss": "^8.5.15",
+    "svelte-check": "^4.7.1",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.6"
   }
 }

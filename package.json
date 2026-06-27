@@ -14,7 +14,8 @@
     "db:generate": "pnpm --filter @vai/backend db:generate",
     "db:migrate": "pnpm --filter @vai/backend db:migrate",
     "db:seed": "pnpm --filter @vai/backend db:seed",
-    "infra:health": "pnpm --filter @vai/backend health:check"
+    "infra:health": "pnpm --filter @vai/backend health:check",
+    "api:generate": "pnpm --filter @vai/backend openapi:export && pnpm --filter @vai/api-contracts generate"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
