@@ -90,6 +90,15 @@ pnpm --filter @vai/backend health:check
 
 The command reports database and object-storage availability separately.
 
+Backend database-backed integration tests require `TEST_DATABASE_URL`:
+
+```bash
+$env:TEST_DATABASE_URL="postgres://vai2:vai2_password@localhost:55432/vai2"
+pnpm test:db
+```
+
+Use the PostgreSQL port from `.env` or your Compose override.
+
 ## Apps
 
 - `apps/web`: SvelteKit frontend, planned for Phase 9.

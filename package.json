@@ -8,6 +8,7 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
+    "test:db": "pnpm --filter @vai/backend test:db",
     "lint": "pnpm -r --if-present lint",
     "format": "pnpm -r --if-present format",
     "db:generate": "pnpm --filter @vai/backend db:generate",

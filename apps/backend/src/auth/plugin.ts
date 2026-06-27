@@ -126,6 +126,12 @@ function readOrganizationId(request: FastifyRequest): string | undefined {
     return header;
   }
 
+  const params = request.params;
+  if (params && typeof params === "object" && "organizationId" in params) {
+    const value = (params as { readonly organizationId?: unknown }).organizationId;
+    return typeof value === "string" ? value : undefined;
+  }
+
   const query = request.query;
   if (query && typeof query === "object" && "organizationId" in query) {
     const value = (query as { readonly organizationId?: unknown }).organizationId;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 
 import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -9,10 +10,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createTestConfig } from "../../test-support/config.js";
 import { seedMvp } from "../../cli/seed-mvp.js";
+import { buildApp } from "../../app.js";
+import { createJwtIssuer } from "../../auth/jwt.js";
+import type { AuthService, AuthSession } from "../../auth/types.js";
 import {
   registerBaselineOrchestrators,
   registerBaselineProcessors
 } from "../../baseline-processing/pipeline.js";
+import type { ObjectStorageClient } from "../object-storage/plugin.js";
 import { createEventBus } from "../../processing/event-bus.js";
 import { createOrchestratorRegistry } from "../../processing/orchestrator-registry.js";
 import {
@@ -1005,6 +1010,179 @@ describe("Phase 7 baseline processing skeleton", () => {
   });
 });
 
+describe("Phase 8 backend read APIs", () => {
+  dbIt("returns organization-scoped read responses and source content", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createReadApiHttpFixture(database);
+    const app = await buildApp({
+      config,
+      logger: false,
+      database: {
+        query: getClient().query.bind(getClient()),
+        drizzle: database
+      },
+      objectStorage: createObjectStorageDouble("pdf-content"),
+      auth: createReadApiAuthOptions(context.organization.id)
+    });
+    const cookie = `vai_access_token=${createReadApiJwt().issuePair("read-api-user").accessToken}`;
+
+    const status = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/document-sets/${context.documentSet.id}/status`,
+      headers: { cookie }
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      organizationId: context.organization.id,
+      documentSetId: context.documentSet.id,
+      intakeStatus: "accepted",
+      baselineStatus: "completed_with_warnings",
+      warnings: [{ code: "fixture_warning" }]
+    });
+
+    const tree = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/project-structure/tree`,
+      headers: { cookie }
+    });
+    expect(tree.statusCode).toBe(200);
+    expect(tree.json()).toMatchObject({
+      organizationId: context.organization.id,
+      nodes: [
+        expect.objectContaining({
+          id: context.node.id,
+          documentCount: 1
+        })
+      ]
+    });
+
+    const nodeDocuments = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/project-structure/nodes/${context.node.id}/documents`,
+      headers: { cookie }
+    });
+    expect(nodeDocuments.statusCode).toBe(200);
+    expect(nodeDocuments.json()).toMatchObject({
+      documents: [
+        {
+          documentId: context.document.id,
+          documentVersionId: context.version.id,
+          sourceFileName: "source.pdf",
+          status: "ready",
+          placementStatus: "placed",
+          typeResolution: {
+            family: "drawing",
+            confidence: "placeholder"
+          }
+        }
+      ]
+    });
+
+    const metadata = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${context.version.id}`,
+      headers: { cookie }
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json()).toMatchObject({
+      documentVersionId: context.version.id,
+      sourceFile: {
+        originalName: "source.pdf",
+        mimeType: "application/pdf"
+      },
+      actions: {
+        view: {
+          available: true,
+          url: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content?disposition=inline`
+        },
+        download: {
+          available: true,
+          url: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content?disposition=attachment`
+        }
+      }
+    });
+
+    const access = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${context.version.id}/access`,
+      headers: { cookie }
+    });
+    expect(access.statusCode).toBe(200);
+    expect(access.json()).toMatchObject({
+      mode: "proxied",
+      viewUrl: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content?disposition=inline`,
+      downloadUrl: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content?disposition=attachment`
+    });
+
+    const typedData = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/document-versions/${context.version.id}/typed-data`,
+      headers: { cookie }
+    });
+    expect(typedData.statusCode).toBe(200);
+    expect(typedData.json()).toMatchObject({ state: "available" });
+    expect(typedData.json().records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          family: "drawing",
+          data: { source: "fixture" }
+        }),
+        expect.objectContaining({
+          family: "estimate",
+          data: { source: "secondary-fixture" }
+        })
+      ])
+    );
+
+    const content = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content?disposition=inline`,
+      headers: { cookie }
+    });
+    expect(content.statusCode).toBe(200);
+    expect(content.body).toBe("pdf-content");
+    expect(content.headers["content-type"]).toContain("application/pdf");
+
+    await app.close();
+  });
+
+  dbIt("does not expose read API records across organizations", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const first = await createReadApiHttpFixture(database);
+    const second = await createReadApiHttpFixture(database);
+    const app = await buildApp({
+      config,
+      logger: false,
+      database: {
+        query: getClient().query.bind(getClient()),
+        drizzle: database
+      },
+      objectStorage: createObjectStorageDouble("not-used"),
+      auth: createReadApiAuthOptions(second.organization.id)
+    });
+    const cookie = `vai_access_token=${createReadApiJwt().issuePair("read-api-user").accessToken}`;
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/organizations/${first.organization.id}/document-sets/${first.documentSet.id}/status`,
+      headers: { cookie }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "forbidden"
+      }
+    });
+
+    await app.close();
+  });
+});
+
 describe("Phase 4 seed", () => {
   dbIt("is repeatable without duplicating users, organizations, roles, or memberships", async () => {
     const database = getDatabase();
@@ -1204,8 +1382,153 @@ async function createRegisteredDocumentContext(database: TestDb) {
   return { ...context, document: documentWithCurrentVersion, version };
 }
 
+async function createReadApiHttpFixture(database: TestDb) {
+  const context = await createRegisteredDocumentContext(database);
+  const registry = createDocumentRegistryRepository(database);
+  const processing = createProcessingRepository(database);
+  const baselineFacts = createBaselineFactsRepository(database);
+  const projectStructure = createProjectStructureRepository(database);
+  const baselineProcessing = createBaselineProcessingRepository(database);
+  await registry.updateDocumentVersionStatus({
+    organizationId: context.organization.id,
+    id: context.version.id,
+    status: "ready"
+  });
+  await registry.updateDocumentStatus({
+    organizationId: context.organization.id,
+    id: context.document.id,
+    status: "ready"
+  });
+  const job = await processing.enqueue({
+    organizationId: context.organization.id,
+    processorId: "fixture",
+    processorVersion: "1.0.0",
+    jobType: "fixture",
+    payload: {}
+  });
+  await baselineFacts.upsertDocumentTypeResolution({
+    organizationId: context.organization.id,
+    documentVersionId: context.version.id,
+    family: "drawing",
+    confidence: "placeholder",
+    alternatives: [],
+    producedByJobId: job.id
+  });
+  await baselineFacts.upsertTypedDataRecord({
+    organizationId: context.organization.id,
+    documentVersionId: context.version.id,
+    family: "drawing",
+    data: { source: "fixture" },
+    producedByJobId: job.id
+  });
+  await baselineFacts.upsertTypedDataRecord({
+    organizationId: context.organization.id,
+    documentVersionId: context.version.id,
+    family: "estimate",
+    data: { source: "secondary-fixture" },
+    producedByJobId: job.id
+  });
+  const identity = await baselineFacts.upsertDocumentIdentity({
+    organizationId: context.organization.id,
+    documentId: context.document.id,
+    documentVersionId: context.version.id,
+    role: "own_code",
+    normalizedValue: "PRJ-001",
+    parseStatus: "parsed",
+    parsedParts: { project: "PRJ" },
+    producedByJobId: job.id
+  });
+  const node = await projectStructure.findOrCreateNode({
+    organizationId: context.organization.id,
+    kind: "project",
+    key: "PRJ",
+    title: "PRJ",
+    subject: "project",
+    sourceIdentityIds: [identity.id]
+  });
+  const placement = await projectStructure.createOrUpdatePlacement({
+    organizationId: context.organization.id,
+    documentId: context.document.id,
+    documentVersionId: context.version.id,
+    placedByIdentityId: identity.id,
+    nodeId: node.id,
+    status: "placed",
+    producedByJobId: job.id
+  });
+  await baselineProcessing.upsertResult({
+    organizationId: context.organization.id,
+    documentSetId: context.documentSet.id,
+    status: "completed_with_warnings",
+    documentIds: [context.document.id],
+    documentVersionIds: [context.version.id],
+    documentIdentityIds: [identity.id],
+    projectStructureNodeIds: [node.id],
+    projectStructurePlacementIds: [placement.id],
+    warnings: [{ code: "fixture_warning", message: "Fixture warning" }]
+  });
+
+  return { ...context, identity, node, placement };
+}
+
+function createReadApiAuthOptions(organizationId: string) {
+  const session: AuthSession = {
+    user: {
+      id: "read-api-user",
+      email: "read-api@example.test",
+      fullName: "Read API User"
+    },
+    organizations: [
+      {
+        id: organizationId,
+        name: "Read API Organization",
+        membershipId: "read-api-membership",
+        roleIds: ["read-api-role"],
+        permissionKeys: ["document.view"]
+      }
+    ]
+  };
+  const authService: AuthService = {
+    async login() {
+      return session;
+    },
+    async loadSession(input) {
+      return input.userId === session.user.id ? session : undefined;
+    }
+  };
+
+  return {
+    authService,
+    jwtIssuer: createReadApiJwt()
+  };
+}
+
+function createReadApiJwt() {
+  return createJwtIssuer({
+    accessSecret: config.jwt.accessSecret,
+    refreshSecret: config.jwt.refreshSecret
+  });
+}
+
+function createObjectStorageDouble(content: string): ObjectStorageClient {
+  return {
+    headBucket: async () => undefined,
+    putObject: async () => undefined,
+    deleteObject: async () => undefined,
+    getObject: async () => Readable.from([content]),
+    destroy: () => undefined
+  };
+}
+
 function getDatabase(): TestDb | undefined {
   return databaseAvailable ? db : undefined;
+}
+
+function getClient(): Client {
+  if (!client) {
+    throw new Error("Test database client is not initialized");
+  }
+
+  return client;
 }
 
 async function countRows(

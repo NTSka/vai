@@ -35,7 +35,7 @@ const testSession: AuthSession = {
       name: "MVP Organization",
       membershipId: "membership-1",
       roleIds: ["role-1"],
-      permissionKeys: ["document.upload"]
+      permissionKeys: ["document.upload", "document.view"]
     }
   ]
 };
@@ -182,16 +182,139 @@ describe("backend app", () => {
       method: "GET",
       url: "/openapi.json"
     });
+    const openapi = response.json();
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    expect(openapi).toMatchObject({
       openapi: "3.0.3",
       paths: {
         "/health/live": {},
-        "/health/ready": {}
+        "/health/ready": {},
+        "/organizations/{organizationId}/document-sets/{documentSetId}/status": {},
+        "/organizations/{organizationId}/processing/progress": {},
+        "/organizations/{organizationId}/project-structure/tree": {},
+        "/organizations/{organizationId}/project-structure/nodes/{nodeId}/documents": {},
+        "/organizations/{organizationId}/source-documents/{documentVersionId}": {},
+        "/organizations/{organizationId}/source-documents/{documentVersionId}/access": {},
+        "/organizations/{organizationId}/source-documents/{documentVersionId}/content":
+          {},
+        "/organizations/{organizationId}/document-versions/{documentVersionId}/typed-data":
+          {}
       }
     });
-    expect(response.json().paths).not.toHaveProperty("/sample/echo");
+    expect(openapi.paths).not.toHaveProperty("/sample/echo");
+    expect(
+      openapi.paths["/organizations/{organizationId}/document-sets/{documentSetId}/status"]
+        .get.responses["200"].content["application/json"].schema.properties
+    ).toHaveProperty("baselineStatus");
+    expect(
+      openapi.paths[
+        "/organizations/{organizationId}/project-structure/nodes/{nodeId}/documents"
+      ].get.responses["200"].content["application/json"].schema.properties
+    ).toHaveProperty("documents");
+    const sourceContentResponse =
+      openapi.paths[
+        "/organizations/{organizationId}/source-documents/{documentVersionId}/content"
+      ].get.responses["200"];
+    expect(sourceContentResponse.content).not.toHaveProperty("application/json");
+    expect(sourceContentResponse.content).toMatchObject({
+      "application/pdf": {
+        schema: {
+          type: "string",
+          format: "binary"
+        }
+      },
+      "application/octet-stream": {
+        schema: {
+          type: "string",
+          format: "binary"
+        }
+      }
+    });
+
+    await app.close();
+  });
+
+  it("rejects read API requests for a different organization path", async () => {
+    const jwtIssuer = createTestJwtIssuer();
+    const tokens = jwtIssuer.issuePair(testSession.user.id);
+    const app = await buildApp({
+      config: createTestConfig(),
+      logger: false,
+      database: healthyDatabase,
+      objectStorage: healthyObjectStorage,
+      auth: {
+        authService,
+        jwtIssuer
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/organizations/other-organization/document-sets/document-set-1/status",
+      headers: {
+        cookie: `vai_access_token=${tokens.accessToken}`,
+        "x-organization-id": testSession.organizations[0]?.id
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "forbidden",
+        message: "Organization membership is required"
+      }
+    });
+
+    await app.close();
+  });
+
+  it("resolves organization context from route params for direct browser links", async () => {
+    const jwtIssuer = createTestJwtIssuer();
+    const tokens = jwtIssuer.issuePair(testSession.user.id);
+    const app = await buildApp({
+      config: createTestConfig(),
+      logger: false,
+      database: healthyDatabase,
+      objectStorage: healthyObjectStorage,
+      auth: {
+        authService,
+        jwtIssuer
+      }
+    });
+
+    app.get(
+      "/auth/test/organizations/:organizationId/context",
+      {
+        schema: {
+          params: z.object({
+            organizationId: z.string()
+          }),
+          response: {
+            200: z.object({
+              organizationId: z.string()
+            })
+          }
+        },
+        preHandler: app.requireOrganizationContext
+      },
+      async (request) => ({
+        organizationId: request.organization?.id ?? "missing"
+      })
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/auth/test/organizations/${testSession.organizations[0]?.id}/context`,
+      headers: {
+        cookie: `vai_access_token=${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      organizationId: testSession.organizations[0]?.id
+    });
 
     await app.close();
   });

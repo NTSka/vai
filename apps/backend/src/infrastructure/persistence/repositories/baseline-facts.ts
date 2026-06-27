@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import * as schema from "../schema/index.js";
 import type { Db } from "./common.js";
@@ -13,6 +13,16 @@ export type BaselineFactsRepository = {
     readonly organizationId: string;
     readonly documentVersionId: string;
   }): Promise<typeof schema.storedFiles.$inferSelect | undefined>;
+  findDocumentVersionWithStoredFile(input: {
+    readonly organizationId: string;
+    readonly documentVersionId: string;
+  }): Promise<
+    | {
+        readonly version: typeof schema.documentVersions.$inferSelect;
+        readonly storedFile: typeof schema.storedFiles.$inferSelect;
+      }
+    | undefined
+  >;
   listDocumentVersionsForSet(input: {
     readonly organizationId: string;
     readonly documentSetId: string;
@@ -41,6 +51,10 @@ export type BaselineFactsRepository = {
     readonly organizationId: string;
     readonly documentVersionId: string;
   }): Promise<typeof schema.typedDataRecords.$inferSelect | undefined>;
+  listTypedDataRecords(input: {
+    readonly organizationId: string;
+    readonly documentVersionId: string;
+  }): Promise<ReadonlyArray<typeof schema.typedDataRecords.$inferSelect>>;
   upsertDocumentIdentity(
     input: typeof schema.documentIdentities.$inferInsert
   ): Promise<typeof schema.documentIdentities.$inferSelect>;
@@ -91,6 +105,31 @@ export function createBaselineFactsRepository(db: Db): BaselineFactsRepository {
         .limit(1);
 
       return row?.storedFile;
+    },
+
+    async findDocumentVersionWithStoredFile(input) {
+      const [row] = await db
+        .select({
+          version: schema.documentVersions,
+          storedFile: schema.storedFiles
+        })
+        .from(schema.documentVersions)
+        .innerJoin(
+          schema.storedFiles,
+          and(
+            eq(schema.storedFiles.organizationId, schema.documentVersions.organizationId),
+            eq(schema.storedFiles.id, schema.documentVersions.storedFileId)
+          )
+        )
+        .where(
+          and(
+            eq(schema.documentVersions.organizationId, input.organizationId),
+            eq(schema.documentVersions.id, input.documentVersionId)
+          )
+        )
+        .limit(1);
+
+      return row;
     },
 
     async listDocumentVersionsForSet(input) {
@@ -234,6 +273,19 @@ export function createBaselineFactsRepository(db: Db): BaselineFactsRepository {
         .limit(1);
 
       return record;
+    },
+
+    async listTypedDataRecords(input) {
+      return db
+        .select()
+        .from(schema.typedDataRecords)
+        .where(
+          and(
+            eq(schema.typedDataRecords.organizationId, input.organizationId),
+            eq(schema.typedDataRecords.documentVersionId, input.documentVersionId)
+          )
+        )
+        .orderBy(asc(schema.typedDataRecords.family), asc(schema.typedDataRecords.id));
     },
 
     async upsertDocumentIdentity(input) {

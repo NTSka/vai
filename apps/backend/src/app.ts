@@ -24,6 +24,7 @@ import {
 } from "./infrastructure/object-storage/plugin.js";
 import { registerErrorHandler } from "./http/errors.js";
 import { registerAuthRoutes } from "./http/routes/auth.js";
+import { registerBackendReadApiRoutes } from "./http/routes/backend-read-apis.js";
 import {
   registerDocumentIntakeRoutes,
   type RegisterDocumentIntakeRoutesOptions
@@ -73,6 +74,14 @@ export async function buildApp(
         version: "0.0.0"
       }
     },
+    transformObject: (documentObject) => {
+      if ("openapiObject" in documentObject) {
+        patchBinarySourceContentResponse(documentObject.openapiObject);
+        return documentObject.openapiObject;
+      }
+
+      return documentObject.swaggerObject;
+    },
     transform: jsonSchemaTransform
   });
 
@@ -96,6 +105,51 @@ export async function buildApp(
   await registerAuthRoutes(app);
   await registerDocumentIntakeRoutes(app, options.documentIntake);
   await registerProcessingProgressRoutes(app);
+  await registerBackendReadApiRoutes(app);
 
   return app;
+}
+
+function patchBinarySourceContentResponse(openapiObject: unknown): void {
+  const document = openapiObject as {
+    paths?: Record<
+      string,
+      | {
+          get?: {
+            responses?: Record<
+              string,
+              | {
+                  description?: string;
+                  content?: Record<string, unknown>;
+                }
+              | { readonly $ref: string }
+            >;
+          };
+        }
+      | undefined
+    >;
+  };
+  const sourceContentResponse =
+    document.paths?.[
+      "/organizations/{organizationId}/source-documents/{documentVersionId}/content"
+    ]?.get?.responses?.["200"];
+  if (!sourceContentResponse || "$ref" in sourceContentResponse) {
+    return;
+  }
+
+  sourceContentResponse.description = "Binary source document stream.";
+  sourceContentResponse.content = {
+    "application/pdf": {
+      schema: {
+        type: "string",
+        format: "binary"
+      }
+    },
+    "application/octet-stream": {
+      schema: {
+        type: "string",
+        format: "binary"
+      }
+    }
+  };
 }

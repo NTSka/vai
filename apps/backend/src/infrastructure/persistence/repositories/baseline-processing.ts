@@ -1,10 +1,14 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import * as schema from "../schema/index.js";
 import type { Db } from "./common.js";
 import { requireRow } from "./common.js";
 
 export type BaselineProcessingRepository = {
+  findResultForDocumentSet(input: {
+    readonly organizationId: string;
+    readonly documentSetId: string;
+  }): Promise<typeof schema.baselineProcessingResults.$inferSelect | undefined>;
   upsertResult(input: typeof schema.baselineProcessingResults.$inferInsert): Promise<
     typeof schema.baselineProcessingResults.$inferSelect
   >;
@@ -29,6 +33,21 @@ export function createBaselineProcessingRepository(
   db: Db
 ): BaselineProcessingRepository {
   return {
+    async findResultForDocumentSet(input) {
+      const [result] = await db
+        .select()
+        .from(schema.baselineProcessingResults)
+        .where(
+          and(
+            eq(schema.baselineProcessingResults.organizationId, input.organizationId),
+            eq(schema.baselineProcessingResults.documentSetId, input.documentSetId)
+          )
+        )
+        .limit(1);
+
+      return result;
+    },
+
     async upsertResult(input) {
       const [result] = await db
         .insert(schema.baselineProcessingResults)
