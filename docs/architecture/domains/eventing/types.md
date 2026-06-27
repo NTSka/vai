@@ -14,7 +14,11 @@ internal event dispatcher behind the same architectural contract.
   models and stores.
 - Events should be durable and observable.
 - Event payloads must be versioned or evolve compatibly.
-- Event implementation is an infrastructure decision.
+- Event implementation is an infrastructure decision hidden behind an
+  `EventBus` port.
+- The MVP implementation should use a PostgreSQL-backed outbox/internal
+  dispatcher, while preserving the ability to replace it with an external
+  broker later.
 - Processors should not directly call downstream processors to continue a
   pipeline.
 
@@ -52,7 +56,8 @@ interface DomainEvent {
 ## EventBus Port
 
 The architecture should expose an event publishing/subscription boundary. The
-first implementation may choose the backing infrastructure later.
+first implementation uses a PostgreSQL-backed outbox/internal dispatcher behind
+this boundary.
 
 ```ts
 interface EventBus {
@@ -104,7 +109,7 @@ interface EventConsumerCheckpoint {
 
 ## Out of Scope
 
-- Specific event bus technology.
+- External broker selection beyond the MVP outbox implementation.
 - Full event schema registry design.
 - Dead-letter queue policy.
 - Event retention policy.
@@ -112,8 +117,6 @@ interface EventConsumerCheckpoint {
 
 ## Open Questions
 
-- Should the first implementation use a real event bus or a durable internal
-  event dispatcher?
 - Should event schemas be defined in TypeScript, JSON Schema, Protobuf, or
   another schema format?
 - Which events must be public integration events and which are internal domain

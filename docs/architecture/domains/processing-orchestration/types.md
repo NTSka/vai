@@ -13,6 +13,8 @@ outputs.
   workflow engine, or another runtime implementation.
 - The processing orchestration model should not depend on a specific runtime
   technology.
+- Processing orchestration should expose job queue and dispatcher ports. The MVP
+  implementation should use PostgreSQL-backed durable jobs behind those ports.
 - All processing jobs share lifecycle fields, status, processor identity, and
   error shape.
 - Domain-specific jobs extend the base processing job shape with their own
@@ -252,10 +254,13 @@ dispatcher, or another compatible notification mechanism. The important
 architectural constraint is that processors do not directly call downstream
 processors or mutate other domains to continue the pipeline.
 
+For the MVP, this boundary is implemented through the EventBus port backed by a
+PostgreSQL outbox/internal dispatcher.
+
 ## Out of Scope
 
-- Runtime implementation details such as database jobs, external queues, or
-  workflow engines.
+- External queue or workflow-engine selection beyond the MVP PostgreSQL-backed
+  job implementation.
 - Domain-specific output models.
 - Processor selection rules.
 - Retry policy details.
@@ -270,5 +275,3 @@ processors or mutate other domains to continue the pipeline.
   separate persisted records, or only by application-level types?
 - Should dependency conditions support failed/skipped/custom domain states, or
   should dependencies remain limited to common lifecycle states?
-- Should the first implementation use a real event bus or a durable internal
-  event dispatcher behind an `EventBus` port?

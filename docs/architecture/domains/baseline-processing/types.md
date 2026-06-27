@@ -7,6 +7,11 @@ The baseline flow is intentionally below business capabilities. It does not run
 RD-estimate comparison or other configurable checks. Its purpose is to produce
 the normalized processing result that later capabilities can consume.
 
+Detailed user, processing, progress, navigation, and viewing behavior is
+captured in `docs/architecture/flows/baseline-document-processing.md`.
+Processor-level finite state models are captured in
+`docs/architecture/implementation/baseline-processor-fsm.md`.
+
 ## Scope
 
 The baseline processing slice covers:

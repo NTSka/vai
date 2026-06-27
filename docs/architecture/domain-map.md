@@ -158,6 +158,8 @@ Examples: intake, document registration, file technical processing, content
 extraction, document type resolution, typed data extraction, document identity
 resolution, project structure projection.
 
+Detailed flow: `docs/architecture/flows/baseline-document-processing.md`.
+
 ## Capabilities
 
 Capabilities are configurable business features built on top of normalized
