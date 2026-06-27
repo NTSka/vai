@@ -231,7 +231,8 @@ export function createDefaultProcessorRegistry(input: {
     baselineFacts: input.baselineFacts,
     projectStructure: input.projectStructure,
     baselineProcessing: input.baselineProcessing,
-    eventing: input.eventing
+    eventing: input.eventing,
+    objectStorage: input.objectStorage
   });
   inputDocumentIntakeForRuntime.set(registry, input.documentIntake);
 

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
@@ -11,7 +12,21 @@ import type { ProcessingRepository } from "../infrastructure/persistence/reposit
 import type { ProjectStructureRepository } from "../infrastructure/persistence/repositories/project-structure.js";
 import type * as schema from "../infrastructure/persistence/schema/index.js";
 import type { OrchestratorRegistry } from "../processing/orchestrator-registry.js";
-import type { ProcessorRegistry } from "../processing/processor-runtime.js";
+import {
+  ProcessorExecutionError,
+  type ProcessorRegistry
+} from "../processing/processor-runtime.js";
+import type { ObjectStorageClient } from "../infrastructure/object-storage/plugin.js";
+import {
+  buildXlsxCellsPayload,
+  buildXlsxWorkbookPayload,
+  loadXlsxWorkbook,
+  serializeJsonPayload,
+  XlsxWorkbookReadError,
+  xlsxCellPayloadInlineThresholdBytes,
+  type XlsxCellCollectionPayload,
+  type XlsxCellPayloadStorage
+} from "./xlsx-artifacts.js";
 
 type ProcessingJob = typeof schema.processingJobs.$inferSelect;
 type DomainEvent = typeof schema.domainEvents.$inferSelect;
@@ -89,6 +104,14 @@ export function registerBaselineOrchestrators(input: {
     processorId: "baseline_summarizer",
     jobType: "baseline_summary"
   });
+  registerVersionToJob(input, "baseline-summarizer-file-technical-failed", "file_technical.failed", {
+    processorId: "baseline_summarizer",
+    jobType: "baseline_summary"
+  });
+  registerVersionToJob(input, "baseline-summarizer-content-failed", "content.failed", {
+    processorId: "baseline_summarizer",
+    jobType: "baseline_summary"
+  });
 }
 
 export function registerBaselineProcessors(input: {
@@ -100,6 +123,7 @@ export function registerBaselineProcessors(input: {
   readonly projectStructure: ProjectStructureRepository;
   readonly baselineProcessing: BaselineProcessingRepository;
   readonly eventing: EventingRepository;
+  readonly objectStorage?: ObjectStorageClient;
 }): void {
   input.registry.register({
     processorId: "document_registrar",
@@ -349,7 +373,9 @@ async function executeFileTechnicalPlaceholder(
   input: {
     readonly processing: ProcessingRepository;
     readonly baselineFacts: BaselineFactsRepository;
+    readonly documentRegistry: DocumentRegistryRepository;
     readonly eventing: EventingRepository;
+    readonly objectStorage?: ObjectStorageClient;
   },
   job: ProcessingJob
 ): Promise<void> {
@@ -360,6 +386,47 @@ async function executeFileTechnicalPlaceholder(
   });
   if (!detection || detection.format === "unsupported") {
     await failJob(input.processing, job, "supported_format_required", payload);
+    return;
+  }
+
+  if (detection.format === "xlsx") {
+    const storedFile = await input.baselineFacts.findStoredFileForVersion({
+      organizationId: job.organizationId,
+      documentVersionId: payload.documentVersionId
+    });
+    if (!storedFile) {
+      await failJob(input.processing, job, "stored_file_not_found", payload);
+      return;
+    }
+    if (!input.objectStorage) {
+      await failJob(input.processing, job, "object_storage_required", payload);
+      return;
+    }
+
+    const workbook = await loadXlsxWorkbookForProcessor({
+      objectStorage: input.objectStorage,
+      bucket: storedFile.storage.bucket,
+      key: storedFile.storage.key
+    }).catch(async (error: unknown) => {
+      if (isXlsxParseError(error)) {
+        await persistFailedXlsxTechnicalOutcome(input, job, payload, error);
+        return undefined;
+      }
+      throw error;
+    });
+    if (!workbook) {
+      return;
+    }
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: job.organizationId,
+      documentVersionId: payload.documentVersionId,
+      artifactType: "xlsx_workbook",
+      payload: buildXlsxWorkbookPayload(workbook),
+      producedByJobId: job.id
+    });
+    await completeJobAndPublishEvents(input.processing, job, [
+      buildVersionEvent(job, "file_technical.completed", payload)
+    ]);
     return;
   }
 
@@ -379,7 +446,9 @@ async function executeContentPlaceholder(
   input: {
     readonly processing: ProcessingRepository;
     readonly baselineFacts: BaselineFactsRepository;
+    readonly documentRegistry: DocumentRegistryRepository;
     readonly eventing: EventingRepository;
+    readonly objectStorage?: ObjectStorageClient;
   },
   job: ProcessingJob
 ): Promise<void> {
@@ -390,6 +459,60 @@ async function executeContentPlaceholder(
   });
   if (!storedFile) {
     await failJob(input.processing, job, "stored_file_not_found", payload);
+    return;
+  }
+
+  const detection = await input.baselineFacts.findFileFormatDetection({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+  if (detection?.format === "xlsx") {
+    const workbookArtifact = await input.baselineFacts.findContentArtifact({
+      organizationId: job.organizationId,
+      documentVersionId: payload.documentVersionId,
+      artifactType: "xlsx_workbook"
+    });
+    if (!workbookArtifact || workbookArtifact.payload["status"] === "failed") {
+      await failJob(input.processing, job, "xlsx_workbook_artifact_missing", payload);
+      return;
+    }
+    if (!input.objectStorage) {
+      await failJob(input.processing, job, "object_storage_required", payload);
+      return;
+    }
+
+    const workbook = await loadXlsxWorkbookForProcessor({
+      objectStorage: input.objectStorage,
+      bucket: storedFile.storage.bucket,
+      key: storedFile.storage.key
+    }).catch(async (error: unknown) => {
+      if (isXlsxParseError(error)) {
+        await persistFailedXlsxContentOutcome(input, job, payload, error);
+        return undefined;
+      }
+      throw error;
+    });
+    if (!workbook) {
+      return;
+    }
+    const cellStorage = await storeXlsxCellPayload({
+      organizationId: job.organizationId,
+      documentVersionId: payload.documentVersionId,
+      jobId: job.id,
+      objectStorage: input.objectStorage,
+      bucket: storedFile.storage.bucket,
+      cells: buildXlsxCellsPayload(workbook)
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: job.organizationId,
+      documentVersionId: payload.documentVersionId,
+      artifactType: "xlsx_cells",
+      payload: buildXlsxContentArtifactPayload(cellStorage),
+      producedByJobId: job.id
+    });
+    await completeJobAndPublishEvents(input.processing, job, [
+      buildVersionEvent(job, "content.extracted", payload)
+    ]);
     return;
   }
 
@@ -633,6 +756,15 @@ async function executeBaselineSummary(
         }
       ];
     }
+    if (version.status === "failed") {
+      return [
+        {
+          code: "document_version_processing_failed",
+          message: "Document version processing failed",
+          documentVersionId: version.id
+        }
+      ];
+    }
     const identity = identities.find((candidate) => candidate.documentVersionId === version.id);
     if (identity && identity.parseStatus !== "parsed") {
       return [
@@ -780,4 +912,197 @@ function parseCodeParts(value: string): Record<string, unknown> {
     project: parts[0] ?? value,
     segments: parts
   };
+}
+
+async function persistFailedXlsxTechnicalOutcome(
+  input: {
+    readonly processing: ProcessingRepository;
+    readonly baselineFacts: BaselineFactsRepository;
+    readonly documentRegistry: DocumentRegistryRepository;
+  },
+  job: ProcessingJob,
+  payload: z.infer<typeof documentVersionPayloadSchema>,
+  error: unknown
+): Promise<void> {
+  await input.documentRegistry.updateDocumentVersionStatus({
+    organizationId: job.organizationId,
+    id: payload.documentVersionId,
+    status: "failed"
+  });
+  await input.documentRegistry.updateDocumentStatus({
+    organizationId: job.organizationId,
+    id: payload.documentId,
+    status: "failed"
+  });
+  await input.baselineFacts.upsertContentArtifact({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId,
+    artifactType: "xlsx_workbook",
+    payload: {
+      format: "xlsx",
+      status: "failed",
+      diagnostics: [
+        {
+          code: "xlsx_workbook_unreadable",
+          message: error instanceof Error ? error.message : "XLSX workbook could not be read",
+          severity: "error"
+        }
+      ]
+    },
+    producedByJobId: job.id
+  });
+  await completeJobAndPublishEvents(input.processing, job, [
+    buildVersionEvent(job, "file_technical.failed", payload)
+  ]);
+}
+
+async function persistFailedXlsxContentOutcome(
+  input: {
+    readonly processing: ProcessingRepository;
+    readonly baselineFacts: BaselineFactsRepository;
+    readonly documentRegistry: DocumentRegistryRepository;
+  },
+  job: ProcessingJob,
+  payload: z.infer<typeof documentVersionPayloadSchema>,
+  error: unknown
+): Promise<void> {
+  await input.documentRegistry.updateDocumentVersionStatus({
+    organizationId: job.organizationId,
+    id: payload.documentVersionId,
+    status: "failed"
+  });
+  await input.documentRegistry.updateDocumentStatus({
+    organizationId: job.organizationId,
+    id: payload.documentId,
+    status: "failed"
+  });
+  await input.baselineFacts.upsertContentArtifact({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId,
+    artifactType: "xlsx_cells",
+    payload: {
+      kind: "cell",
+      status: "failed",
+      diagnostics: [
+        {
+          code: "xlsx_cell_extraction_failed",
+          message: error instanceof Error ? error.message : "XLSX cells could not be extracted",
+          severity: "error"
+        }
+      ]
+    },
+    producedByJobId: job.id
+  });
+  await completeJobAndPublishEvents(input.processing, job, [
+    buildVersionEvent(job, "content.failed", payload)
+  ]);
+}
+
+async function loadXlsxWorkbookForProcessor(input: {
+  readonly objectStorage: ObjectStorageClient;
+  readonly bucket: string | undefined;
+  readonly key: string;
+}) {
+  try {
+    return await loadXlsxWorkbook(input);
+  } catch (error) {
+    if (error instanceof XlsxWorkbookReadError && error.category === "storage") {
+      throw new ProcessorExecutionError({
+        code: "xlsx_storage_read_failed",
+        message: error.message,
+        retryable: true,
+        details: {
+          bucket: input.bucket,
+          key: input.key
+        }
+      });
+    }
+    throw error;
+  }
+}
+
+async function storeXlsxCellPayload(input: {
+  readonly organizationId: string;
+  readonly documentVersionId: string;
+  readonly jobId: string;
+  readonly objectStorage: ObjectStorageClient;
+  readonly bucket: string | undefined;
+  readonly cells: XlsxCellCollectionPayload;
+}): Promise<XlsxCellPayloadStorage> {
+  const bytes = serializeJsonPayload(input.cells);
+  if (bytes.byteLength <= xlsxCellPayloadInlineThresholdBytes) {
+    return {
+      storage: "inline",
+      byteLength: bytes.byteLength,
+      cellCollection: input.cells
+    };
+  }
+  if (!input.bucket) {
+    throw new Error("Stored XLSX file is missing a storage bucket for generated payloads");
+  }
+
+  const key = [
+    "organizations",
+    input.organizationId,
+    "content-artifacts",
+    input.documentVersionId,
+    `${input.jobId}-${randomUUID()}-xlsx-cells.json`
+  ].join("/");
+  try {
+    await input.objectStorage.putObject({
+      bucket: input.bucket,
+      key,
+      body: bytes,
+      contentType: "application/json",
+      contentLength: bytes.byteLength
+    });
+  } catch (error) {
+    throw new ProcessorExecutionError({
+      code: "xlsx_payload_ref_write_failed",
+      message: "XLSX cell payload could not be written to object storage",
+      retryable: true,
+      details: {
+        bucket: input.bucket,
+        key,
+        cause: error instanceof Error ? error.message : String(error)
+      }
+    });
+  }
+
+  return {
+    storage: "payload_ref",
+    byteLength: bytes.byteLength,
+    cellCount: input.cells.cells.length,
+    payloadRef: {
+      provider: "s3_compatible",
+      bucket: input.bucket,
+      key,
+      contentType: "application/json"
+    }
+  };
+}
+
+function buildXlsxContentArtifactPayload(
+  cellStorage: XlsxCellPayloadStorage
+): Record<string, unknown> {
+  if (cellStorage.storage === "inline") {
+    return {
+      ...cellStorage.cellCollection,
+      storage: "inline",
+      byteLength: cellStorage.byteLength
+    };
+  }
+
+  return {
+    kind: "cell",
+    payloadSchema: { id: "xlsx_cell_collection", version: "1.0.0" },
+    storage: "payload_ref",
+    byteLength: cellStorage.byteLength,
+    cellCount: cellStorage.cellCount,
+    payloadRef: cellStorage.payloadRef
+  };
+}
+
+function isXlsxParseError(error: unknown): boolean {
+  return error instanceof XlsxWorkbookReadError && error.category === "parse";
 }

@@ -37,6 +37,11 @@ export type BaselineFactsRepository = {
   upsertContentArtifact(
     input: typeof schema.contentArtifacts.$inferInsert
   ): Promise<typeof schema.contentArtifacts.$inferSelect>;
+  findContentArtifact(input: {
+    readonly organizationId: string;
+    readonly documentVersionId: string;
+    readonly artifactType: string;
+  }): Promise<typeof schema.contentArtifacts.$inferSelect | undefined>;
   upsertDocumentTypeResolution(
     input: typeof schema.documentTypeResolutions.$inferInsert
   ): Promise<typeof schema.documentTypeResolutions.$inferSelect>;
@@ -200,6 +205,22 @@ export function createBaselineFactsRepository(db: Db): BaselineFactsRepository {
         .returning();
 
       return requireRow(artifact, "content artifact");
+    },
+
+    async findContentArtifact(input) {
+      const [artifact] = await db
+        .select()
+        .from(schema.contentArtifacts)
+        .where(
+          and(
+            eq(schema.contentArtifacts.organizationId, input.organizationId),
+            eq(schema.contentArtifacts.documentVersionId, input.documentVersionId),
+            eq(schema.contentArtifacts.artifactType, input.artifactType)
+          )
+        )
+        .limit(1);
+
+      return artifact;
     },
 
     async upsertDocumentTypeResolution(input) {

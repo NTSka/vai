@@ -688,6 +688,21 @@ Tasks:
 - Implement PDF table reconstruction baseline.
 - Add artifact payload storage rules.
 
+Initial artifact payload storage rule:
+
+- Content payloads may stay inline only while their serialized JSON payload is
+  small enough for cheap database reads.
+- XLSX cell collections use a 512 KiB serialized JSON inline threshold in the
+  backend implementation.
+- Larger XLSX cell collections are written to object storage and the
+  `content_artifacts.payload` JSON stores a `payloadRef` with provider, bucket,
+  key, content type, byte length, and cell count.
+- XLSX workbook extraction stores workbook-level technical metadata; XLSX cell
+  extraction is owned by the content processor, which applies the inline versus
+  `payloadRef` rule.
+- Downstream processors should follow `payloadRef` instead of assuming every
+  content artifact payload is inline.
+
 Deliverables:
 
 - PDF technical outputs are persisted.

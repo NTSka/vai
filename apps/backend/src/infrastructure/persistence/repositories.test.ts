@@ -6,6 +6,7 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 import { Client } from "pg";
+import ExcelJS from "exceljs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createTestConfig } from "../../test-support/config.js";
@@ -961,6 +962,84 @@ describe("Phase 7 baseline processing skeleton", () => {
     ]);
   });
 
+  dbIt("extracts XLSX workbook facts and cell content artifacts", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const xlsxContent = await createWorkbookFixture();
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-002-estimate.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const fixture = createBaselinePipelineFixture(database, {
+      objectStorage: createObjectStorageDouble(xlsxContent)
+    });
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+    await runBaselinePipelineToIdle(fixture);
+
+    const [version] = await database
+      .select()
+      .from(schema.documentVersions)
+      .where(eq(schema.documentVersions.documentSetId, context.documentSet.id));
+    const artifacts = await database
+      .select()
+      .from(schema.contentArtifacts)
+      .where(eq(schema.contentArtifacts.documentVersionId, version?.id ?? ""));
+    const workbookArtifact = artifacts.find(
+      (artifact) => artifact.artifactType === "xlsx_workbook"
+    );
+    const cellsArtifact = artifacts.find((artifact) => artifact.artifactType === "xlsx_cells");
+    const jobs = await database
+      .select()
+      .from(schema.processingJobs)
+      .where(eq(schema.processingJobs.organizationId, context.organization.id));
+
+    expect(version?.status).toBe("ready");
+    expect(workbookArtifact?.payload).toMatchObject({
+      format: "xlsx",
+      workbook: {
+        worksheetCount: 2,
+        sheets: expect.arrayContaining([
+          expect.objectContaining({ name: "Estimate" }),
+          expect.objectContaining({ name: "Meta" })
+        ])
+      }
+    });
+    expect(cellsArtifact?.payload).toMatchObject({
+      kind: "cell",
+      cells: expect.arrayContaining([
+        expect.objectContaining({
+          location: { kind: "xlsx", sheetName: "Estimate", cellAddress: "A1" },
+          value: "Code",
+          valueType: "string"
+        }),
+        expect.objectContaining({
+          location: { kind: "xlsx", sheetName: "Estimate", cellAddress: "B2" },
+          value: "42",
+          valueType: "number"
+        })
+      ])
+    });
+    expect(artifacts.filter((artifact) => artifact.artifactType === "xlsx_cells")).toHaveLength(1);
+    expect(jobs.every((job) => job.status === "completed")).toBe(true);
+  });
+
   dbIt("persists missing own-code as unplaced domain outcome", async () => {
     const database = getDatabase();
     if (!database) return;
@@ -1311,7 +1390,10 @@ async function createDocumentContext(
   return { ...context, storedFile, documentSet };
 }
 
-function createBaselinePipelineFixture(database: TestDb) {
+function createBaselinePipelineFixture(
+  database: TestDb,
+  options: { readonly objectStorage?: ObjectStorageClient } = {}
+) {
   const processing = createProcessingRepository(database);
   const documentIntake = createDocumentIntakeRepository(database);
   const documentRegistry = createDocumentRegistryRepository(database);
@@ -1332,7 +1414,8 @@ function createBaselinePipelineFixture(database: TestDb) {
     baselineFacts,
     projectStructure,
     baselineProcessing,
-    eventing
+    eventing,
+    ...(options.objectStorage ? { objectStorage: options.objectStorage } : {})
   });
 
   return {
@@ -1509,7 +1592,21 @@ function createReadApiJwt() {
   });
 }
 
-function createObjectStorageDouble(content: string): ObjectStorageClient {
+async function createWorkbookFixture(): Promise<Uint8Array> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "VAI test";
+  const estimate = workbook.addWorksheet("Estimate");
+  estimate.getCell("A1").value = "Code";
+  estimate.getCell("B1").value = "Quantity";
+  estimate.getCell("A2").value = "PRJ-002";
+  estimate.getCell("B2").value = 42;
+  const meta = workbook.addWorksheet("Meta");
+  meta.getCell("A1").value = true;
+
+  return new Uint8Array(await workbook.xlsx.writeBuffer());
+}
+
+function createObjectStorageDouble(content: string | Uint8Array): ObjectStorageClient {
   return {
     headBucket: async () => undefined,
     putObject: async () => undefined,
