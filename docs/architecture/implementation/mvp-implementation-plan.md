@@ -156,11 +156,11 @@ tasks while preserving the original task as an epic/container.
 | --- | --- | --- | --- | --- |
 | MVP-0801 | Add document set status endpoint. | MVP-0711, MVP-0406 | `GET` endpoint for one document set status. | Response is organization-scoped and includes intake status, baseline status, warnings, and timestamps. |
 | MVP-0802 | Add organization processing progress endpoint. | MVP-0712, MVP-0406 | Aggregate progress API. | Response includes counts and percent. Percent is documented as approximate UX projection. |
-| MVP-0803 | Add project structure tree endpoint. | MVP-0710, MVP-0406 | Tree read API. | Response returns stable nodes, parent-child relations, counts, and unplaced/unsupported group if present. |
-| MVP-0804 | Add node document list endpoint. | MVP-0710, MVP-0406 | Documents for selected project node. | Response includes document id, version id, source file name, status, type resolution summary if available. |
+| MVP-0803 | Add project structure tree endpoint. | MVP-0710, MVP-0406 | Tree read API. | Response returns stable nodes, parent-child relations, counts, search labels/code segments where available, and unplaced/unsupported fallback groups as selectable pseudo-nodes with stable keys if present. |
+| MVP-0804 | Add node document list endpoint. | MVP-0710, MVP-0406 | Documents for selected project node. | Response includes document id, version id, source file name, status, placement status, type resolution summary if available, and parsed identity/search labels where available. Endpoint supports real project node ids and fallback pseudo-node keys returned by the tree endpoint. |
 | MVP-0805 | Add source document metadata endpoint. | MVP-0702, MVP-0406 | Source document info API. | Response includes file metadata and available view/download actions. |
 | MVP-0806 | Add source document download/view URL endpoint. | MVP-0204, MVP-0805 | Presigned or proxied source access. | User can access only files in organizations where they have membership. |
-| MVP-0807 | Add parsed typed document placeholder endpoint. | MVP-0708, MVP-0406 | Typed view API placeholder. | Endpoint returns available typed data records or explicit not-available state. |
+| MVP-0807 | Add parsed typed document placeholder endpoint. | MVP-0708, MVP-0406 | Typed view API placeholder. | Endpoint returns available typed data records or explicit not-available state for the Phase 9 placeholder route. |
 | MVP-0808 | Add OpenAPI coverage for read APIs. | MVP-0801, MVP-0802, MVP-0803, MVP-0804, MVP-0805, MVP-0806, MVP-0807 | Updated OpenAPI contract. | Generated/openapi output includes all MVP read endpoints with request/response schemas. |
 
 ### Phase 9 Tasks: Frontend MVP Shell
@@ -169,17 +169,18 @@ tasks while preserving the original task as an epic/container.
 | --- | --- | --- | --- | --- |
 | MVP-0901 | Scaffold SvelteKit app. | MVP-0002 | Working `apps/web`. | Web app starts locally and can load a simple route. |
 | MVP-0902 | Configure Tailwind and Bits UI. | MVP-0901 | UI foundation. | Basic components render with project styling. No custom design system is invented prematurely. |
-| MVP-0903 | Add API client setup. | MVP-0808, MVP-0901 | Generated or checked API client. | Frontend calls backend through typed client or contract-checked wrapper. |
+| MVP-0903 | Add API client setup. | MVP-0404, MVP-0501, MVP-0808, MVP-0901 | Generated or checked API client. | Frontend calls backend through typed client or contract-checked wrapper covering auth/session/logout, upload, document-set status, organization progress, project tree, node documents, source metadata/access, and typed-data placeholder APIs. |
 | MVP-0904 | Implement login screen. | MVP-0404, MVP-0903 | User login UI. | Seeded user can log in from browser. Failed login shows a clear error. |
-| MVP-0905 | Implement organization shell. | MVP-0406, MVP-0904 | Authenticated layout. | Authenticated user sees organization context. Anonymous user is redirected to login. |
-| MVP-0906 | Implement upload screen. | MVP-0502, MVP-0905 | File upload UI. | User can select one or more files and submit upload. Upload response links to document set status. |
-| MVP-0907 | Implement processing progress view. | MVP-0801, MVP-0802, MVP-0906 | Progress UI. | User sees processing/running/completed/failed state after upload without inspecting raw job rows. |
+| MVP-0905 | Implement organization shell. | MVP-0406, MVP-0904 | Authenticated layout. | Authenticated user sees organization context. Anonymous user is redirected to login. Reload restores session through current-session endpoint. Logout clears client state and returns to login. Selected organization id is applied to all organization-scoped API calls. UI handles 401/403 by returning to login or showing membership/permission loss without leaking stale organization data. |
+| MVP-0906 | Implement upload screen. | MVP-0504, MVP-0801, MVP-0905 | File upload UI. | User can select one or more files and submit upload. Upload response includes document set id and links to document set status. |
+| MVP-0907 | Implement processing progress view. | MVP-0801, MVP-0802, MVP-0906 | Progress UI. | User sees processing/running/completed/failed state after upload without inspecting raw job rows. UI polls or revalidates document-set status and organization progress until terminal state or navigation away, and backend errors do not lose the document-set link. |
 | MVP-0908 | Implement project structure tree. | MVP-0803, MVP-0905 | Navigable tree UI. | Tree supports collapse/expand and displays document counts. Empty state is explicit. |
-| MVP-0909 | Implement tree search. | MVP-0908 | Search input over tree. | Search can match visible node title/code segment/document name data returned by API. |
+| MVP-0909 | Implement tree search. | MVP-0908 | Search input over tree. | Search can match visible node title, code segment, document name, and parsed identity/search labels returned by API. |
 | MVP-0910 | Implement node document list. | MVP-0804, MVP-0908 | Selected-node document list. | Selecting a node displays attached documents and version status. |
-| MVP-0911 | Implement unplaced/unsupported group UI. | MVP-0803, MVP-0910 | Visible fallback document group. | Documents that cannot be placed or are unsupported remain visible to user. |
-| MVP-0912 | Implement source document open/download route. | MVP-0806, MVP-0910 | Source document route. | User can open/download original file from document list. Unsupported preview falls back to download. |
-| MVP-0913 | Add Playwright smoke test. | MVP-0904, MVP-0906, MVP-0908, MVP-0912 | Browser E2E smoke coverage. | Test covers login, upload, progress visibility, project navigation, and source file access path. |
+| MVP-0911 | Implement unplaced/unsupported group UI. | MVP-0803, MVP-0910 | Visible fallback document group. | Documents that cannot be placed or are unsupported remain visible to user. Fallback groups are selectable pseudo-nodes with stable keys supported by the node document list endpoint. |
+| MVP-0912 | Implement source document open/download route. | MVP-0806, MVP-0910 | Source document route. | User can download original files and open browser-native previews where available. Unsupported preview falls back to download. Dedicated PDF/XLSX viewers are explicitly deferred beyond Phase 9 unless already provided by browser-native handling. |
+| MVP-0913 | Add typed-data placeholder route. | MVP-0807, MVP-0910 | Placeholder typed-data view. | User can open a typed-data route for a document version and see available placeholder records or an explicit not-available state. Rich typed document views remain deferred to semantic/capability phases. |
+| MVP-0914 | Add Playwright smoke test. | MVP-0904, MVP-0906, MVP-0907, MVP-0908, MVP-0911, MVP-0912, MVP-0913 | Browser E2E smoke coverage. | Test covers login -> upload -> progress visibility -> placed or unplaced/unsupported document visibility -> source open/download path -> typed-data placeholder/not-available path. |
 
 ### Phase 10 Tasks: Python CV/OCR Service Skeleton
 
@@ -208,6 +209,7 @@ tasks while preserving the original task as an epic/container.
 | MVP-1109 | Adapt targeted OCR with Tesseract. | MVP-1001, MVP-1108 | OCR text artifacts. | OCR runs only for candidate regions and produces `ocr_text` artifacts with confidence/engine metadata when available. |
 | MVP-1110 | Implement PDF table reconstruction baseline. | MVP-1107, MVP-1109 | Table content artifacts. | Reconstructed tables preserve cell text, location, row/column indexes, and source artifact links. |
 | MVP-1111 | Define artifact payload storage rules. | MVP-1104, MVP-1106, MVP-1110 | Inline vs object-store payload policy. | Small payloads can be stored inline. Large payloads use `payloadRef`. Consumers do not depend on processor-specific output files. |
+| MVP-1112 | Add dedicated PDF/XLSX source viewers. | MVP-0806, MVP-0905, MVP-1104, MVP-1106 | Rich source viewer UI. | PDF files can be opened in a page-aware viewer using source or render artifacts. XLSX files can be opened in a workbook/sheet viewer using workbook and cell artifacts. Download remains available as fallback. |
 
 ### Phase 12 Tasks: Typed Data, Identity, and GOST Placement
 
@@ -569,27 +571,61 @@ Tasks:
 - Add generated or checked API client.
 - Add login page.
 - Add authenticated organization shell.
+- Restore session on reload through the current-session endpoint.
+- Add logout behavior that clears UI state and returns to login.
+- Apply selected organization context to all organization-scoped API calls and
+  handle 401/403 without leaking stale organization data.
 - Add upload screen.
 - Add processing progress view.
+- Poll or revalidate document-set status and organization progress after
+  upload until terminal state or navigation away.
 - Add project structure tree.
 - Add tree search input.
 - Add selected-node document list.
 - Add unplaced/unsupported document group.
 - Add source document view/download route.
+- Scope Phase 9 source viewing to download plus browser-native preview where
+  available. Dedicated PDF/XLSX viewers are deferred unless already handled by
+  the browser-native path.
+- Add typed-data placeholder route that displays available placeholder records
+  or an explicit not-available state.
 - Add basic error and empty states.
 
 Deliverables:
 
 - User can log in.
+- User session survives reload through the backend session endpoint.
+- User can log out and return to login.
+- User sees permission or membership loss as an explicit UI state.
 - User can upload documents.
 - User can observe processing progress.
 - User can navigate project structure.
+- User can see placed documents or explicit unplaced/unsupported groups.
 - User can open or download source files.
+- User can open typed-data placeholder state for a document version.
 
 Definition of done:
 
-- Playwright smoke test covers login -> upload -> project tree.
-- UI handles empty, processing, ready, failed, and unsupported states.
+- API client is generated from OpenAPI or otherwise contract-checked and covers
+  auth/session/logout, upload, progress/status, tree, node document list,
+  source metadata/access, and typed-data placeholder APIs.
+- Playwright smoke test covers login -> upload -> progress visibility -> placed
+  or unplaced/unsupported document visibility -> source open/download path ->
+  typed-data placeholder or not-available path.
+- UI handles empty, loading, processing, ready, failed, unsupported, and
+  unplaced states without exposing raw job rows.
+- Organization-scoped requests use the active organization id consistently.
+  401/403 responses clear or block the affected workspace state instead of
+  displaying stale data as current.
+- Progress view polls or revalidates document-set status and organization
+  progress until terminal state or navigation away. Backend polling errors are
+  visible and do not remove the latest document-set link.
+- Source viewing supports original-file download and browser-native preview
+  where available. Unsupported previews fall back to download; dedicated PDF
+  and XLSX viewers are deferred beyond Phase 9 unless explicitly implemented.
+- Typed-data route returns available placeholder records or explicit
+  not-available state; rich typed document views remain deferred to later
+  semantic/capability phases.
 
 ## Phase 10: Python CV/OCR Service Skeleton
 

@@ -266,7 +266,11 @@ A document attached to a project structure node may be opened in two ways:
 - original source viewer;
 - parsed typed view.
 
-Initial source viewers:
+Phase 9 source access is limited to original-file download plus browser-native
+preview where available. Unsupported preview falls back to download.
+
+Dedicated source viewers are added after the MVP shell proves the source-access
+path:
 
 - PDF viewer for original PDF files;
 - XLSX viewer for original XLSX files;
