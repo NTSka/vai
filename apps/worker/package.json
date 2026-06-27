@@ -7,11 +7,17 @@
     "dev": "node --enable-source-maps dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"worker tests are not implemented yet\"",
+    "test": "pnpm --filter @vai/backend build && vitest run",
     "lint": "echo \"worker lint is not configured yet\"",
     "format": "echo \"worker format is not configured yet\""
   },
   "dependencies": {
-    "@vai/backend": "workspace:*"
+    "@vai/backend": "workspace:*",
+    "@vai/domain-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@grpc/grpc-js": "^1.14.2",
+    "@grpc/proto-loader": "^0.8.0",
+    "vitest": "^3.2.4"
   }
 }

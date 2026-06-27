@@ -1,0 +1,14 @@
+{
+  "name": "@vai/cv-ocr-service",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "generate": "python scripts/ensure_python_version.py && python scripts/generate_proto.py",
+    "dev": "python scripts/ensure_python_version.py && python scripts/generate_proto.py && python -m vai_cv_ocr_service",
+    "build": "python scripts/ensure_python_version.py && python scripts/generate_proto.py",
+    "typecheck": "echo \"cv-ocr-service typecheck is not configured yet\"",
+    "test": "python scripts/ensure_python_version.py && python scripts/generate_proto.py && pytest",
+    "lint": "echo \"cv-ocr-service lint is not configured yet\"",
+    "format": "echo \"cv-ocr-service format is not configured yet\""
+  }
+}

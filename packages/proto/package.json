@@ -1,0 +1,16 @@
+{
+  "name": "@vai/proto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./cv-ocr": "./proto/vai/cv_ocr/v1/cv_ocr_service.proto"
+  },
+  "scripts": {
+    "build": "echo \"proto package has no build step\"",
+    "typecheck": "echo \"proto package has no typecheck step\"",
+    "test": "echo \"proto package tests are not implemented yet\"",
+    "lint": "echo \"proto package lint is not configured yet\"",
+    "format": "echo \"proto package format is not configured yet\""
+  }
+}
