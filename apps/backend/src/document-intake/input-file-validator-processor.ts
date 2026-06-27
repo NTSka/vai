@@ -18,12 +18,6 @@ const archiveMimeTypes = new Set([
   "application/vnd.rar",
   "application/x-7z-compressed"
 ]);
-const supportedExtensions = new Set([".pdf", ".xlsx", ".xls"]);
-const supportedMimeTypes = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel"
-]);
 
 export type ExecuteInputFileValidationJobInput = {
   readonly organizationId: string;
@@ -218,19 +212,6 @@ function validateStoredFiles(input: {
         }
       };
     }
-
-    if (!isSupportedRegularFile(extension, file.mimeType)) {
-      return {
-        code: "unsupported_input_file",
-        message: "Uploaded file type is not supported for intake",
-        details: {
-          storedFileId: file.id,
-          originalName: file.originalName,
-          extension,
-          mimeType: file.mimeType
-        }
-      };
-    }
   }
 
   return undefined;
@@ -326,16 +307,6 @@ function isArchive(extension: string | undefined, mimeType: string | null): bool
   return (
     (extension ? archiveExtensions.has(extension) : false) ||
     (mimeType ? archiveMimeTypes.has(mimeType) : false)
-  );
-}
-
-function isSupportedRegularFile(
-  extension: string | undefined,
-  mimeType: string | null
-): boolean {
-  return (
-    (extension ? supportedExtensions.has(extension) : false) ||
-    (mimeType ? supportedMimeTypes.has(mimeType) : false)
   );
 }
 

@@ -4,9 +4,14 @@ import {
   createInputFileValidatorProcessor,
   type CompleteAcceptedInputValidation
 } from "../document-intake/input-file-validator-processor.js";
+import { registerBaselineProcessors } from "../baseline-processing/pipeline.js";
+import type { BaselineFactsRepository } from "../infrastructure/persistence/repositories/baseline-facts.js";
+import type { BaselineProcessingRepository } from "../infrastructure/persistence/repositories/baseline-processing.js";
 import type { DocumentIntakeRepository } from "../infrastructure/persistence/repositories/document-intake.js";
+import type { DocumentRegistryRepository } from "../infrastructure/persistence/repositories/document-registry.js";
 import type { EventingRepository } from "../infrastructure/persistence/repositories/eventing.js";
 import type { ProcessingRepository } from "../infrastructure/persistence/repositories/processing-orchestration.js";
+import type { ProjectStructureRepository } from "../infrastructure/persistence/repositories/project-structure.js";
 import type * as schema from "../infrastructure/persistence/schema/index.js";
 
 type ProcessingJob = typeof schema.processingJobs.$inferSelect;
@@ -118,6 +123,10 @@ const inputDocumentIntakeForRuntime = new WeakMap<
 export function createDefaultProcessorRegistry(input: {
   readonly processing: ProcessingRepository;
   readonly documentIntake: DocumentIntakeRepository;
+  readonly documentRegistry: DocumentRegistryRepository;
+  readonly baselineFacts: BaselineFactsRepository;
+  readonly projectStructure: ProjectStructureRepository;
+  readonly baselineProcessing: BaselineProcessingRepository;
   readonly eventing: EventingRepository;
   readonly bucket: string;
   readonly objectStorage: import("../infrastructure/object-storage/plugin.js").ObjectStorageClient;
@@ -159,6 +168,16 @@ export function createDefaultProcessorRegistry(input: {
         jobId: job.id
       });
     }
+  });
+  registerBaselineProcessors({
+    registry,
+    processing: input.processing,
+    documentIntake: input.documentIntake,
+    documentRegistry: input.documentRegistry,
+    baselineFacts: input.baselineFacts,
+    projectStructure: input.projectStructure,
+    baselineProcessing: input.baselineProcessing,
+    eventing: input.eventing
   });
   inputDocumentIntakeForRuntime.set(registry, input.documentIntake);
 

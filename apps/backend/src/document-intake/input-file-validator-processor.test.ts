@@ -126,6 +126,39 @@ describe("input file validator processor", () => {
     expect(fixture.events).toHaveLength(0);
   });
 
+  it("accepts unsupported regular files so format detection can mark document versions", async () => {
+    const fixture = createProcessorFixture({
+      storedFiles: [
+        {
+          id: "stored-file-1",
+          organizationId: "organization-1",
+          originalName: "notes.txt",
+          mimeType: "text/plain",
+          extension: ".txt",
+          sizeBytes: 256,
+          checksum: "checksum",
+          checksumAlgorithm: "sha256",
+          storage: {
+            provider: "s3_compatible",
+            bucket: "vai-local-files",
+            key: "original/notes.txt"
+          },
+          purpose: "original_upload",
+          createdAt: new Date()
+        }
+      ]
+    });
+
+    await fixture.processor.execute({
+      organizationId: "organization-1",
+      jobId: "job-1"
+    });
+
+    expect(fixture.documentSetStatuses).toEqual(["intake_processing", "accepted"]);
+    expect(fixture.jobStatuses).toEqual(["completed"]);
+    expect(fixture.events[0]?.type).toBe("document_set.accepted");
+  });
+
   it("marks the document set failed when validation dependencies fail unexpectedly", async () => {
     const fixture = createProcessorFixture({ failFindStoredFiles: true });
 
@@ -210,7 +243,36 @@ function createProcessorFixture(
     async enqueue() {
       throw new Error("not used");
     },
+    async enqueueOnceByCausation() {
+      throw new Error("not used");
+    },
     async completeJob(input) {
+      jobStatuses.push("completed");
+      return {
+        id: input.id,
+        organizationId: input.organizationId,
+        processorId: "input_file_validator",
+        processorVersion: "1.0.0",
+        jobType: "input_file_validation",
+        payload: {
+          documentSetId: "document-set-1",
+          inputFileIds: ["stored-file-1"]
+        },
+        status: "completed",
+        scheduledAt: new Date(),
+        startedAt: new Date(),
+        completedAt: new Date(),
+        error: null,
+        attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async completeJobAndPublishEvents(input) {
       jobStatuses.push("completed");
       return {
         id: input.id,

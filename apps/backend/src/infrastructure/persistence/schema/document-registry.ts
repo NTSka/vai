@@ -73,6 +73,11 @@ export const documentVersions = pgTable(
       table.documentId,
       table.versionNumber
     ),
+    uniqueIndex("document_versions_document_set_file_unique").on(
+      table.organizationId,
+      table.documentSetId,
+      table.storedFileId
+    ),
     foreignKey({
       name: "document_versions_document_same_org_fk",
       columns: [table.organizationId, table.documentId],

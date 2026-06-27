@@ -1,4 +1,5 @@
 export * from "./access-control.js";
+export * from "./baseline-facts.js";
 export * from "./baseline-processing.js";
 export * from "./document-intake.js";
 export * from "./document-registry.js";
@@ -10,6 +11,13 @@ export * from "./processing-orchestration.js";
 export * from "./project-structure.js";
 
 import { roles } from "./access-control.js";
+import {
+  contentArtifacts,
+  documentIdentities,
+  documentTypeResolutions,
+  fileFormatDetections,
+  typedDataRecords
+} from "./baseline-facts.js";
 import { baselineProcessingResults } from "./baseline-processing.js";
 import { documentSets, storedFileProvenance, storedFiles } from "./document-intake.js";
 import { documentVersions, documents } from "./document-registry.js";
@@ -36,6 +44,11 @@ export const schema = {
   processingJobDependencies,
   domainEvents,
   eventConsumerCheckpoints,
+  fileFormatDetections,
+  contentArtifacts,
+  documentTypeResolutions,
+  typedDataRecords,
+  documentIdentities,
   baselineProcessingResults,
   projectStructureNodes,
   projectStructurePlacements

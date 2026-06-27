@@ -5,6 +5,14 @@ import type { Db } from "./common.js";
 import { requireRow } from "./common.js";
 
 export type ProjectStructureRepository = {
+  listPlacementsForDocumentSet(input: {
+    readonly organizationId: string;
+    readonly documentSetId: string;
+  }): Promise<ReadonlyArray<typeof schema.projectStructurePlacements.$inferSelect>>;
+  listNodesForDocumentSet(input: {
+    readonly organizationId: string;
+    readonly documentSetId: string;
+  }): Promise<ReadonlyArray<typeof schema.projectStructureNodes.$inferSelect>>;
   findOrCreateNode(input: {
     readonly organizationId: string;
     readonly kind: typeof schema.projectStructureNodeKind.enumValues[number];
@@ -29,6 +37,68 @@ export function createProjectStructureRepository(
   db: Db
 ): ProjectStructureRepository {
   return {
+    async listPlacementsForDocumentSet(input) {
+      return db
+        .select({ placement: schema.projectStructurePlacements })
+        .from(schema.projectStructurePlacements)
+        .innerJoin(
+          schema.documentVersions,
+          and(
+            eq(
+              schema.documentVersions.organizationId,
+              schema.projectStructurePlacements.organizationId
+            ),
+            eq(
+              schema.documentVersions.id,
+              schema.projectStructurePlacements.documentVersionId
+            )
+          )
+        )
+        .where(
+          and(
+            eq(schema.projectStructurePlacements.organizationId, input.organizationId),
+            eq(schema.documentVersions.documentSetId, input.documentSetId)
+          )
+        )
+        .then((rows) => rows.map((row) => row.placement));
+    },
+
+    async listNodesForDocumentSet(input) {
+      return db
+        .select({ node: schema.projectStructureNodes })
+        .from(schema.projectStructureNodes)
+        .innerJoin(
+          schema.projectStructurePlacements,
+          and(
+            eq(
+              schema.projectStructurePlacements.organizationId,
+              schema.projectStructureNodes.organizationId
+            ),
+            eq(schema.projectStructurePlacements.nodeId, schema.projectStructureNodes.id)
+          )
+        )
+        .innerJoin(
+          schema.documentVersions,
+          and(
+            eq(
+              schema.documentVersions.organizationId,
+              schema.projectStructurePlacements.organizationId
+            ),
+            eq(
+              schema.documentVersions.id,
+              schema.projectStructurePlacements.documentVersionId
+            )
+          )
+        )
+        .where(
+          and(
+            eq(schema.projectStructureNodes.organizationId, input.organizationId),
+            eq(schema.documentVersions.documentSetId, input.documentSetId)
+          )
+        )
+        .then((rows) => rows.map((row) => row.node));
+    },
+
     async findOrCreateNode(input) {
       const parentLookupKey = input.parentId ?? "root";
       const [existing] = await db

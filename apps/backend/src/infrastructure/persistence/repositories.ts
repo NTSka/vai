@@ -1,4 +1,5 @@
 export * from "./repositories/access-control.js";
+export * from "./repositories/baseline-facts.js";
 export * from "./repositories/baseline-processing.js";
 export * from "./repositories/document-intake.js";
 export * from "./repositories/document-registry.js";

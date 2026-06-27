@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "document_versions_document_set_file_unique" ON "document_versions" USING btree ("organization_id","document_set_id","stored_file_id");

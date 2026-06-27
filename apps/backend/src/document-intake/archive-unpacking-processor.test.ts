@@ -161,6 +161,9 @@ function createArchiveFixture(input: {
     async enqueue() {
       throw new Error("not used");
     },
+    async enqueueOnceByCausation() {
+      throw new Error("not used");
+    },
     async completeJob(status) {
       jobStatuses.push("completed");
       return {
@@ -170,6 +173,32 @@ function createArchiveFixture(input: {
         processorVersion: "1.0.0",
         jobType: "archive_unpacking",
         payload: {},
+        status: "completed",
+        scheduledAt: new Date(),
+        startedAt: new Date(),
+        completedAt: new Date(),
+        error: null,
+        attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: "correlation-1",
+        causationId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+    },
+    async completeJobAndPublishEvents(status) {
+      jobStatuses.push("completed");
+      return {
+        id: status.id,
+        organizationId: status.organizationId,
+        processorId: "archive_unpacker",
+        processorVersion: "1.0.0",
+        jobType: "archive_unpacking",
+        payload: {
+          documentSetId: "document-set-1",
+          inputFileIds: ["stored-file-1"]
+        },
         status: "completed",
         scheduledAt: new Date(),
         startedAt: new Date(),

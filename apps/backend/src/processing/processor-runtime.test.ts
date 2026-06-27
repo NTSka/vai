@@ -98,7 +98,14 @@ function createRuntimeFixture() {
     async enqueue() {
       throw new Error("not used");
     },
+    async enqueueOnceByCausation() {
+      throw new Error("not used");
+    },
     async completeJob(input) {
+      statuses.push("completed");
+      return { ...job, id: input.id, status: "completed", completedAt: new Date() };
+    },
+    async completeJobAndPublishEvents(input) {
       statuses.push("completed");
       return { ...job, id: input.id, status: "completed", completedAt: new Date() };
     },

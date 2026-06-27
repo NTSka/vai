@@ -4,9 +4,13 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { loadBackendConfig } from "../config.js";
 import { completeAcceptedInputValidationWithRepositories } from "../document-intake/input-file-validator-processor.js";
 import {
+  createBaselineFactsRepository,
+  createBaselineProcessingRepository,
   createDocumentIntakeRepository,
+  createDocumentRegistryRepository,
   createEventingRepository,
-  createProcessingRepository
+  createProcessingRepository,
+  createProjectStructureRepository
 } from "../infrastructure/persistence/repositories.js";
 import { createObjectStorageClient } from "../infrastructure/object-storage/plugin.js";
 import * as schema from "../infrastructure/persistence/schema/index.js";
@@ -16,6 +20,7 @@ import {
 } from "../processing/processor-runtime.js";
 import { createEventBus } from "../processing/event-bus.js";
 import { createOrchestratorRegistry } from "../processing/orchestrator-registry.js";
+import { registerBaselineOrchestrators } from "../baseline-processing/pipeline.js";
 
 export type WorkerRunResult = "processed" | "idle";
 
@@ -82,13 +87,22 @@ function createRuntime(
 ): { runNext(): Promise<WorkerRunResult> } {
   const processing = createProcessingRepository(db);
   const documentIntake = createDocumentIntakeRepository(db);
+  const documentRegistry = createDocumentRegistryRepository(db);
+  const baselineFacts = createBaselineFactsRepository(db);
+  const projectStructure = createProjectStructureRepository(db);
+  const baselineProcessing = createBaselineProcessingRepository(db);
   const eventing = createEventingRepository(db);
   const eventBus = createEventBus({ eventing });
-  createOrchestratorRegistry({ eventBus });
+  const orchestrators = createOrchestratorRegistry({ eventBus });
+  registerBaselineOrchestrators({ registry: orchestrators, processing });
 
   const registry = createDefaultProcessorRegistry({
     processing,
     documentIntake,
+    documentRegistry,
+    baselineFacts,
+    projectStructure,
+    baselineProcessing,
     eventing,
     bucket,
     objectStorage,

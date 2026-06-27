@@ -9,9 +9,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createTestConfig } from "../../test-support/config.js";
 import { seedMvp } from "../../cli/seed-mvp.js";
+import {
+  registerBaselineOrchestrators,
+  registerBaselineProcessors
+} from "../../baseline-processing/pipeline.js";
+import { createEventBus } from "../../processing/event-bus.js";
+import { createOrchestratorRegistry } from "../../processing/orchestrator-registry.js";
+import {
+  createProcessorRegistry,
+  createProcessorRuntime
+} from "../../processing/processor-runtime.js";
 import * as schema from "./schema/index.js";
 import {
   createAccessControlRepository,
+  createBaselineFactsRepository,
   createBaselineProcessingRepository,
   createDocumentIntakeRepository,
   createDocumentRegistryRepository,
@@ -68,6 +79,11 @@ beforeEach(async () => {
       domain_events,
       project_structure_placements,
       project_structure_nodes,
+      document_identities,
+      typed_data_records,
+      document_type_resolutions,
+      content_artifacts,
+      file_format_detections,
       baseline_processing_results,
       processing_job_dependencies,
       processing_jobs,
@@ -244,6 +260,32 @@ describe("Phase 3 repositories", () => {
     expect(unsupported.status).toBe("unsupported");
   });
 
+  dbIt("registers the same stored file as one document version", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database);
+    const registry = createDocumentRegistryRepository(database);
+
+    const first = await registry.registerDocumentVersionForStoredFile({
+      organizationId: context.organization.id,
+      documentSetId: context.documentSet.id,
+      storedFileId: context.storedFile.id
+    });
+    const second = await registry.registerDocumentVersionForStoredFile({
+      organizationId: context.organization.id,
+      documentSetId: context.documentSet.id,
+      storedFileId: context.storedFile.id
+    });
+    const versions = await registry.listVersionsForSet({
+      organizationId: context.organization.id,
+      documentSetId: context.documentSet.id
+    });
+
+    expect(second).toEqual(first);
+    expect(versions).toHaveLength(1);
+  });
+
   dbIt("rejects cross-organization document versions and foreign current versions", async () => {
     const database = getDatabase();
     if (!database) return;
@@ -373,6 +415,50 @@ describe("Phase 3 repositories", () => {
       event.id
     );
     expect(result.warnings).toHaveLength(1);
+  });
+
+  dbIt("completes a job and publishes downstream events in one repository operation", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database);
+    const processing = createProcessingRepository(database);
+    const eventing = createEventingRepository(database);
+    const job = await processing.enqueue({
+      organizationId: context.organization.id,
+      processorId: "fixture_processor",
+      processorVersion: "1.0.0",
+      jobType: "fixture_job",
+      payload: { documentSetId: context.documentSet.id }
+    });
+
+    await processing.claimNextRunnable();
+    const completed = await processing.completeJobAndPublishEvents({
+      organizationId: context.organization.id,
+      id: job.id,
+      events: [
+        {
+          type: "fixture.completed",
+          version: "1",
+          source: "fixture",
+          aggregateType: "document_set",
+          aggregateId: context.documentSet.id,
+          payload: {
+            organizationId: context.organization.id,
+            documentSetId: context.documentSet.id
+          },
+          causationId: job.id
+        }
+      ]
+    });
+    const event = await eventing.findByTypeAndAggregate({
+      type: "fixture.completed",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id
+    });
+
+    expect(completed.status).toBe("completed");
+    expect(event?.causationId).toBe(job.id);
   });
 
   dbIt("serializes consumer event delivery before side effects", async () => {
@@ -741,6 +827,184 @@ describe("Phase 3 repositories", () => {
   });
 });
 
+describe("Phase 7 baseline processing skeleton", () => {
+  dbIt("runs one accepted PDF through the visible skeleton pipeline", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-001-drawing.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const [version] = await database
+      .select()
+      .from(schema.documentVersions)
+      .where(eq(schema.documentVersions.documentSetId, context.documentSet.id));
+    const [document] = await database
+      .select()
+      .from(schema.documents)
+      .where(eq(schema.documents.id, version?.documentId ?? ""));
+    const jobs = await database
+      .select()
+      .from(schema.processingJobs)
+      .where(eq(schema.processingJobs.organizationId, context.organization.id));
+    const result = await createBaselineProcessingRepository(
+      database
+    ).getOrganizationProgress({ organizationId: context.organization.id });
+    const [summary] = await database
+      .select()
+      .from(schema.baselineProcessingResults)
+      .where(eq(schema.baselineProcessingResults.documentSetId, context.documentSet.id));
+
+    expect(version?.status).toBe("ready");
+    expect(document?.status).toBe("ready");
+    expect(jobs.map((job) => job.jobType)).toEqual([
+      "document_registration",
+      "file_format_detection",
+      "file_technical_placeholder",
+      "content_placeholder",
+      "document_type_resolution",
+      "typed_data_extraction",
+      "document_identity_resolution",
+      "project_structure_projection",
+      "baseline_summary"
+    ]);
+    expect(jobs.every((job) => job.status === "completed")).toBe(true);
+    expect(summary?.status).toBe("completed");
+    expect(summary?.documentVersionIds).toEqual([version?.id]);
+    expect(summary?.projectStructurePlacementIds).toHaveLength(1);
+    expect(result.percent).toBe(100);
+  });
+
+  dbIt("marks unsupported registered versions visibly and summarizes warnings", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "notes.txt",
+      mimeType: "text/plain",
+      extension: ".txt"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const [version] = await database
+      .select()
+      .from(schema.documentVersions)
+      .where(eq(schema.documentVersions.documentSetId, context.documentSet.id));
+    const [document] = await database
+      .select()
+      .from(schema.documents)
+      .where(eq(schema.documents.id, version?.documentId ?? ""));
+    const [summary] = await database
+      .select()
+      .from(schema.baselineProcessingResults)
+      .where(eq(schema.baselineProcessingResults.documentSetId, context.documentSet.id));
+    const jobs = await database
+      .select()
+      .from(schema.processingJobs)
+      .where(eq(schema.processingJobs.organizationId, context.organization.id));
+
+    expect(version?.status).toBe("unsupported");
+    expect(document?.status).toBe("failed");
+    expect(jobs.map((job) => job.jobType)).toEqual([
+      "document_registration",
+      "file_format_detection",
+      "baseline_summary"
+    ]);
+    expect(summary?.status).toBe("completed_with_warnings");
+    expect(summary?.warnings).toEqual([
+      {
+        code: "unsupported_file_format",
+        message: "Document version uses an unsupported file format",
+        documentVersionId: version?.id
+      }
+    ]);
+  });
+
+  dbIt("persists missing own-code as unplaced domain outcome", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "drawing.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const [identity] = await database
+      .select()
+      .from(schema.documentIdentities)
+      .where(eq(schema.documentIdentities.organizationId, context.organization.id));
+    const [placement] = await database
+      .select()
+      .from(schema.projectStructurePlacements)
+      .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const [summary] = await database
+      .select()
+      .from(schema.baselineProcessingResults)
+      .where(eq(schema.baselineProcessingResults.documentSetId, context.documentSet.id));
+
+    expect(identity?.parseStatus).toBe("missing");
+    expect(placement?.status).toBe("unplaced");
+    expect(summary?.status).toBe("completed_with_warnings");
+    expect(summary?.warnings[0]).toMatchObject({
+      code: "document_identity_unplaced"
+    });
+  });
+});
+
 describe("Phase 4 seed", () => {
   dbIt("is repeatable without duplicating users, organizations, roles, or memberships", async () => {
     const database = getDatabase();
@@ -833,14 +1097,21 @@ async function createOrganizationContext(database: TestDb) {
   return { user, organization };
 }
 
-async function createDocumentContext(database: TestDb) {
+async function createDocumentContext(
+  database: TestDb,
+  file: {
+    readonly originalName?: string;
+    readonly mimeType?: string;
+    readonly extension?: string;
+  } = {}
+) {
   const context = await createOrganizationContext(database);
   const intake = createDocumentIntakeRepository(database);
   const storedFile = await intake.createStoredFile({
     organizationId: context.organization.id,
-    originalName: "source.pdf",
-    mimeType: "application/pdf",
-    extension: ".pdf",
+    originalName: file.originalName ?? "source.pdf",
+    mimeType: file.mimeType ?? "application/pdf",
+    extension: file.extension ?? ".pdf",
     sizeBytes: 512,
     checksum: `checksum-${randomUUID()}`,
     checksumAlgorithm: "sha256",
@@ -860,6 +1131,55 @@ async function createDocumentContext(database: TestDb) {
   });
 
   return { ...context, storedFile, documentSet };
+}
+
+function createBaselinePipelineFixture(database: TestDb) {
+  const processing = createProcessingRepository(database);
+  const documentIntake = createDocumentIntakeRepository(database);
+  const documentRegistry = createDocumentRegistryRepository(database);
+  const baselineFacts = createBaselineFactsRepository(database);
+  const projectStructure = createProjectStructureRepository(database);
+  const baselineProcessing = createBaselineProcessingRepository(database);
+  const eventing = createEventingRepository(database);
+  const eventBus = createEventBus({ eventing });
+  const orchestrators = createOrchestratorRegistry({ eventBus });
+  const processorRegistry = createProcessorRegistry();
+
+  registerBaselineOrchestrators({ registry: orchestrators, processing });
+  registerBaselineProcessors({
+    registry: processorRegistry,
+    processing,
+    documentIntake,
+    documentRegistry,
+    baselineFacts,
+    projectStructure,
+    baselineProcessing,
+    eventing
+  });
+
+  return {
+    eventing,
+    eventBus,
+    runtime: createProcessorRuntime({ processing, registry: processorRegistry })
+  };
+}
+
+async function runBaselinePipelineToIdle(
+  fixture: ReturnType<typeof createBaselinePipelineFixture>
+): Promise<void> {
+  for (let index = 0; index < 50; index += 1) {
+    const delivered = await fixture.eventBus.dispatchPending();
+    if (delivered > 0) {
+      continue;
+    }
+
+    const result = await fixture.runtime.runNext();
+    if (result === "idle") {
+      return;
+    }
+  }
+
+  throw new Error("Baseline pipeline did not become idle");
 }
 
 async function createRegisteredDocumentContext(database: TestDb) {

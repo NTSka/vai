@@ -20,9 +20,24 @@ export type ProcessingRepository = {
     readonly correlationId?: string;
     readonly causationId?: string;
   }): Promise<typeof schema.processingJobs.$inferSelect>;
+  enqueueOnceByCausation(input: {
+    readonly organizationId: string;
+    readonly processorId: string;
+    readonly processorVersion: string;
+    readonly jobType: string;
+    readonly payload: Record<string, unknown>;
+    readonly maxAttempts?: number;
+    readonly correlationId?: string;
+    readonly causationId: string;
+  }): Promise<typeof schema.processingJobs.$inferSelect>;
   completeJob(input: {
     readonly organizationId: string;
     readonly id: string;
+  }): Promise<typeof schema.processingJobs.$inferSelect>;
+  completeJobAndPublishEvents(input: {
+    readonly organizationId: string;
+    readonly id: string;
+    readonly events: ReadonlyArray<Omit<typeof schema.domainEvents.$inferInsert, "id">>;
   }): Promise<typeof schema.processingJobs.$inferSelect>;
   failJob(input: {
     readonly organizationId: string;
@@ -124,6 +139,27 @@ export function createProcessingRepository(db: Db): ProcessingRepository {
       return requireRow(job, "processing job");
     },
 
+    async enqueueOnceByCausation(input) {
+      const [existing] = await db
+        .select()
+        .from(schema.processingJobs)
+        .where(
+          and(
+            eq(schema.processingJobs.organizationId, input.organizationId),
+            eq(schema.processingJobs.processorId, input.processorId),
+            eq(schema.processingJobs.jobType, input.jobType),
+            eq(schema.processingJobs.causationId, input.causationId)
+          )
+        )
+        .limit(1);
+
+      if (existing) {
+        return existing;
+      }
+
+      return this.enqueue(input);
+    },
+
     async completeJob(input) {
       const now = new Date();
       const [job] = await db
@@ -144,6 +180,31 @@ export function createProcessingRepository(db: Db): ProcessingRepository {
         .returning();
 
       return requireRow(job, "running processing job");
+    },
+
+    async completeJobAndPublishEvents(input) {
+      return db.transaction(async (tx) => {
+        const processing = createProcessingRepository(tx);
+        const completed = await processing.completeJob({
+          organizationId: input.organizationId,
+          id: input.id
+        });
+
+        for (const event of input.events) {
+          await tx
+            .insert(schema.domainEvents)
+            .values(event)
+            .onConflictDoNothing({
+              target: [
+                schema.domainEvents.type,
+                schema.domainEvents.aggregateType,
+                schema.domainEvents.aggregateId
+              ]
+            });
+        }
+
+        return completed;
+      });
     },
 
     async failJob(input) {

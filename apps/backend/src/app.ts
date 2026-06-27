@@ -29,6 +29,7 @@ import {
   type RegisterDocumentIntakeRoutesOptions
 } from "./http/routes/document-intake.js";
 import { registerHealthRoutes } from "./http/routes/health.js";
+import { registerProcessingProgressRoutes } from "./http/routes/processing-progress.js";
 
 export type BuildAppOptions = {
   readonly config?: BackendConfig;
@@ -94,6 +95,7 @@ export async function buildApp(
   await registerHealthRoutes(app);
   await registerAuthRoutes(app);
   await registerDocumentIntakeRoutes(app, options.documentIntake);
+  await registerProcessingProgressRoutes(app);
 
   return app;
 }
