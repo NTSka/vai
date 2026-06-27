@@ -24,6 +24,10 @@ import {
 } from "./infrastructure/object-storage/plugin.js";
 import { registerErrorHandler } from "./http/errors.js";
 import { registerAuthRoutes } from "./http/routes/auth.js";
+import {
+  registerDocumentIntakeRoutes,
+  type RegisterDocumentIntakeRoutesOptions
+} from "./http/routes/document-intake.js";
 import { registerHealthRoutes } from "./http/routes/health.js";
 
 export type BuildAppOptions = {
@@ -32,6 +36,7 @@ export type BuildAppOptions = {
   readonly database?: DatabaseClient;
   readonly objectStorage?: ObjectStorageClient;
   readonly auth?: AuthPluginOptions;
+  readonly documentIntake?: RegisterDocumentIntakeRoutesOptions;
 };
 
 export async function buildApp(
@@ -88,6 +93,7 @@ export async function buildApp(
 
   await registerHealthRoutes(app);
   await registerAuthRoutes(app);
+  await registerDocumentIntakeRoutes(app, options.documentIntake);
 
   return app;
 }

@@ -104,6 +104,11 @@ malware scanning, or zip-bomb protection.
 It does not validate document meaning, document type, project code, estimate
 content, or business consistency.
 
+MVP implementation note: archive uploads are routed to `archive_unpacking`.
+The first supported archive formats are ZIP, 7z, and RAR. The unpacker stores
+extracted PDF/XLS/XLSX files as generated `StoredFile` records and records
+`extracted_from_archive` provenance back to the original uploaded archive.
+
 ## StoredFile
 
 `StoredFile` represents a file saved by the platform. In this domain it is used

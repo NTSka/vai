@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "domain_events_type_aggregate_unique" ON "domain_events" USING btree ("type","aggregate_type","aggregate_id");

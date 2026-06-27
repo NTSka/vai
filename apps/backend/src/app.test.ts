@@ -7,6 +7,7 @@ import type { AuthService, AuthSession } from "./auth/types.js";
 import { createTestConfig } from "./test-support/config.js";
 import type { DatabaseClient } from "./infrastructure/database/plugin.js";
 import type { ObjectStorageClient } from "./infrastructure/object-storage/plugin.js";
+import type { UploadDocumentSetService } from "./document-intake/upload-service.js";
 
 const healthyDatabase: DatabaseClient = {
   query: async () => ({ rows: [], command: "SELECT", rowCount: 0, oid: 0, fields: [] })
@@ -14,6 +15,11 @@ const healthyDatabase: DatabaseClient = {
 
 const healthyObjectStorage: ObjectStorageClient = {
   headBucket: async () => undefined,
+  putObject: async () => undefined,
+  deleteObject: async () => undefined,
+  getObject: async () => {
+    throw new Error("not used");
+  },
   destroy: () => undefined
 };
 
@@ -137,6 +143,11 @@ describe("backend app", () => {
           throw Object.assign(new Error("forbidden"), {
             $metadata: { httpStatusCode: 403 }
           });
+        },
+        putObject: async () => undefined,
+        deleteObject: async () => undefined,
+        getObject: async () => {
+          throw new Error("not used");
         },
         destroy: () => undefined
       }
@@ -388,4 +399,181 @@ describe("backend app", () => {
 
     await app.close();
   });
+
+  it("rejects anonymous document set uploads", async () => {
+    const app = await buildApp({
+      config: createTestConfig(),
+      logger: false,
+      database: healthyDatabase,
+      objectStorage: healthyObjectStorage
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/document-sets/uploads",
+      headers: {
+        ...multipartHeaders("boundary")
+      },
+      payload: multipartBody({
+        boundary: "boundary",
+        files: [{ fieldName: "files", filename: "source.pdf", content: "pdf" }]
+      })
+    });
+
+    expect(response.statusCode).toBe(401);
+
+    await app.close();
+  });
+
+  it("rejects empty document set uploads", async () => {
+    const jwtIssuer = createTestJwtIssuer();
+    const tokens = jwtIssuer.issuePair(testSession.user.id);
+    const app = await buildApp({
+      config: createTestConfig(),
+      logger: false,
+      database: healthyDatabase,
+      objectStorage: healthyObjectStorage,
+      auth: {
+        authService,
+        jwtIssuer
+      },
+      documentIntake: {
+        uploadService: {
+          async upload() {
+            throw new Error("upload service should not be called");
+          }
+        }
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/document-sets/uploads",
+      headers: {
+        cookie: `vai_access_token=${tokens.accessToken}`,
+        "x-organization-id": testSession.organizations[0]?.id,
+        ...multipartHeaders("boundary")
+      },
+      payload: multipartBody({ boundary: "boundary", files: [] })
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "validation_error",
+        message: "At least one file is required"
+      }
+    });
+
+    await app.close();
+  });
+
+  it("uploads document sets for authenticated organization members", async () => {
+    const jwtIssuer = createTestJwtIssuer();
+    const tokens = jwtIssuer.issuePair(testSession.user.id);
+    const uploadCalls: Parameters<UploadDocumentSetService["upload"]>[0][] = [];
+    const uploadService: UploadDocumentSetService = {
+      async upload(input) {
+        uploadCalls.push(input);
+        return {
+          documentSetId: "document-set-1",
+          storedFileIds: ["stored-file-1"],
+          validationJobId: "job-1",
+          status: "uploaded"
+        };
+      }
+    };
+    const app = await buildApp({
+      config: createTestConfig(),
+      logger: false,
+      database: healthyDatabase,
+      objectStorage: healthyObjectStorage,
+      auth: {
+        authService,
+        jwtIssuer
+      },
+      documentIntake: {
+        uploadService
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/document-sets/uploads",
+      headers: {
+        cookie: `vai_access_token=${tokens.accessToken}`,
+        "x-organization-id": testSession.organizations[0]?.id,
+        "x-correlation-id": "upload-correlation-id",
+        ...multipartHeaders("boundary")
+      },
+      payload: multipartBody({
+        boundary: "boundary",
+        files: [
+          {
+            fieldName: "files",
+            filename: "source.pdf",
+            contentType: "application/pdf",
+            content: "pdf-content"
+          }
+        ]
+      })
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({
+      documentSetId: "document-set-1",
+      storedFileIds: ["stored-file-1"],
+      validationJobId: "job-1",
+      status: "uploaded"
+    });
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0]).toMatchObject({
+      organizationId: testSession.organizations[0]?.id,
+      uploadedBy: testSession.user.id,
+      correlationId: "upload-correlation-id"
+    });
+    expect(uploadCalls[0]?.files).toEqual([
+      expect.objectContaining({
+        filename: "source.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: Buffer.byteLength("pdf-content"),
+        checksum: "3c41d3835155c97d51a836c887be9c0063b7b45f61e14017a9d653fa4c655802"
+      })
+    ]);
+
+    await app.close();
+  });
 });
+
+function multipartHeaders(boundary: string): Record<string, string> {
+  return {
+    "content-type": `multipart/form-data; boundary=${boundary}`
+  };
+}
+
+function multipartBody(input: {
+  readonly boundary: string;
+  readonly files: readonly {
+    readonly fieldName: string;
+    readonly filename: string;
+    readonly content: string;
+    readonly contentType?: string;
+  }[];
+}): Buffer {
+  const lines: string[] = [];
+  for (const file of input.files) {
+    lines.push(`--${input.boundary}`);
+    lines.push(
+      `Content-Disposition: form-data; name="${file.fieldName}"; filename="${file.filename}"`
+    );
+    if (file.contentType) {
+      lines.push(`Content-Type: ${file.contentType}`);
+    }
+    lines.push("");
+    lines.push(file.content);
+  }
+  lines.push(`--${input.boundary}--`);
+  lines.push("");
+
+  return Buffer.from(lines.join("\r\n"));
+}

@@ -10,5 +10,8 @@
     "test": "echo \"worker tests are not implemented yet\"",
     "lint": "echo \"worker lint is not configured yet\"",
     "format": "echo \"worker format is not configured yet\""
+  },
+  "dependencies": {
+    "@vai/backend": "workspace:*"
   }
 }

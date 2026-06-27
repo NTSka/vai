@@ -1,4 +1,4 @@
-import { index, jsonb, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const domainEvents = pgTable(
   "domain_events",
@@ -21,7 +21,12 @@ export const domainEvents = pgTable(
   },
   (table) => [
     index("domain_events_pending_idx").on(table.publishedAt, table.id),
-    index("domain_events_aggregate_idx").on(table.aggregateType, table.aggregateId)
+    index("domain_events_aggregate_idx").on(table.aggregateType, table.aggregateId),
+    uniqueIndex("domain_events_type_aggregate_unique").on(
+      table.type,
+      table.aggregateType,
+      table.aggregateId
+    )
   ]
 );
 
