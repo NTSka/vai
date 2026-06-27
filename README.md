@@ -74,7 +74,13 @@ Drizzle commands are wired through the backend package:
 ```bash
 pnpm db:generate
 pnpm db:migrate
+pnpm db:seed
 ```
+
+`pnpm db:seed` creates or updates the MVP user, password credential,
+organization, initial system roles, and owner membership. Override
+`MVP_SEED_EMAIL`, `MVP_SEED_PASSWORD`, `MVP_SEED_FULL_NAME`, or
+`MVP_SEED_ORGANIZATION` in `apps/backend/.env` when needed.
 
 The backend also has an executable local infrastructure check:
 

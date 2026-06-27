@@ -13,6 +13,7 @@ import {
 import swagger from "@fastify/swagger";
 
 import { loadBackendConfig, type BackendConfig } from "./config.js";
+import { registerAuthPlugin, type AuthPluginOptions } from "./auth/plugin.js";
 import {
   registerDatabasePlugin,
   type DatabaseClient
@@ -22,6 +23,7 @@ import {
   type ObjectStorageClient
 } from "./infrastructure/object-storage/plugin.js";
 import { registerErrorHandler } from "./http/errors.js";
+import { registerAuthRoutes } from "./http/routes/auth.js";
 import { registerHealthRoutes } from "./http/routes/health.js";
 
 export type BuildAppOptions = {
@@ -29,6 +31,7 @@ export type BuildAppOptions = {
   readonly logger?: boolean | FastifyBaseLogger;
   readonly database?: DatabaseClient;
   readonly objectStorage?: ObjectStorageClient;
+  readonly auth?: AuthPluginOptions;
 };
 
 export async function buildApp(
@@ -81,7 +84,10 @@ export async function buildApp(
     await registerObjectStoragePlugin(app);
   }
 
+  registerAuthPlugin(app, options.auth);
+
   await registerHealthRoutes(app);
+  await registerAuthRoutes(app);
 
   return app;
 }

@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-import { sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import type { AnyPgTable } from "drizzle-orm/pg-core";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createTestConfig } from "../../test-support/config.js";
+import { seedMvp } from "../../cli/seed-mvp.js";
 import * as schema from "./schema/index.js";
 import {
   createAccessControlRepository,
@@ -506,6 +508,83 @@ describe("Phase 3 repositories", () => {
   });
 });
 
+describe("Phase 4 seed", () => {
+  dbIt("is repeatable without duplicating users, organizations, roles, or memberships", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const seed = {
+      email: "seed-repeatability@example.test",
+      fullName: "Seed Repeatability",
+      password: "seed-password",
+      organizationName: "Seed Repeatability Organization"
+    };
+    const passwordHasher = {
+      async hash(password: string) {
+        return `test-hash:${password}`;
+      }
+    };
+
+    const first = await seedMvp({ db: database, seed, passwordHasher });
+    const second = await seedMvp({ db: database, seed, passwordHasher });
+
+    expect(second).toEqual(first);
+    expect(
+      await countRows(database, schema.users, eq(schema.users.email, seed.email))
+    ).toBe(1);
+    expect(
+      await countRows(
+        database,
+        schema.userCredentials,
+        and(
+          eq(schema.userCredentials.authProvider, "password"),
+          eq(schema.userCredentials.login, seed.email)
+        )
+      )
+    ).toBe(1);
+    expect(
+      await countRows(
+        database,
+        schema.organizations,
+        eq(schema.organizations.name, seed.organizationName)
+      )
+    ).toBe(1);
+    expect(
+      await countRows(
+        database,
+        schema.roles,
+        and(
+          isNull(schema.roles.organizationId),
+          eq(schema.roles.scope, "system"),
+          inArray(schema.roles.name, [
+            "organization_owner",
+            "organization_admin",
+            "organization_member",
+            "organization_viewer"
+          ])
+        )
+      )
+    ).toBe(4);
+    expect(
+      await countRows(
+        database,
+        schema.organizationMembers,
+        and(
+          eq(schema.organizationMembers.organizationId, first.organizationId),
+          eq(schema.organizationMembers.userId, first.userId)
+        )
+      )
+    ).toBe(1);
+    expect(
+      await countRows(
+        database,
+        schema.organizationMemberRoles,
+        eq(schema.organizationMemberRoles.organizationMemberId, first.membershipId)
+      )
+    ).toBe(1);
+  });
+});
+
 async function createOrganizationContext(database: TestDb) {
   const identity = createIdentityRepository(database);
   const organizations = createOrganizationRepository(database);
@@ -574,4 +653,12 @@ async function createRegisteredDocumentContext(database: TestDb) {
 
 function getDatabase(): TestDb | undefined {
   return databaseAvailable ? db : undefined;
+}
+
+async function countRows(
+  database: TestDb,
+  table: AnyPgTable,
+  where: SQL<unknown> | undefined
+): Promise<number> {
+  return database.$count(table, where);
 }

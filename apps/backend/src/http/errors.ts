@@ -34,7 +34,11 @@ export function registerErrorHandler(app: FastifyInstance): void {
         ? maybeStatusError.statusCode
         : 500;
 
-    const code = statusCode === 500 ? "internal_error" : "http_error";
+    const maybeCodedError = normalizedError as Error & {
+      readonly code?: string;
+    };
+    const code =
+      statusCode === 500 ? "internal_error" : maybeCodedError.code ?? "http_error";
     const message =
       statusCode === 500 ? "Internal server error" : normalizedError.message;
 

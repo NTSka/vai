@@ -12,6 +12,7 @@
     "format": "pnpm -r --if-present format",
     "db:generate": "pnpm --filter @vai/backend db:generate",
     "db:migrate": "pnpm --filter @vai/backend db:migrate",
+    "db:seed": "pnpm --filter @vai/backend db:seed",
     "infra:health": "pnpm --filter @vai/backend health:check"
   },
   "devDependencies": {
