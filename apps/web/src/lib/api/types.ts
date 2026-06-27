@@ -58,3 +58,10 @@ export type SourceDocumentMetadata = ResponseBody<
   "get",
   200
 >;
+
+export type TypedData = ResponseBody<
+  "/organizations/{organizationId}/document-versions/{documentVersionId}/typed-data",
+  "get",
+  200
+>;
+export type TypedDataRecord = TypedData["records"][number];

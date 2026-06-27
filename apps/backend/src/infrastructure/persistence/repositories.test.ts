@@ -945,7 +945,7 @@ describe("Phase 7 baseline processing skeleton", () => {
       .where(eq(schema.processingJobs.organizationId, context.organization.id));
 
     expect(version?.status).toBe("unsupported");
-    expect(document?.status).toBe("failed");
+    expect(document?.status).toBe("ready");
     expect(jobs.map((job) => job.jobType)).toEqual([
       "document_registration",
       "file_format_detection",

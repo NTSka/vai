@@ -326,7 +326,7 @@ async function executeFileFormatDetection(
     await input.documentRegistry.updateDocumentStatus({
       organizationId: job.organizationId,
       id: payload.documentId,
-      status: "failed"
+      status: "ready"
     });
   } else {
     await input.documentRegistry.updateDocumentVersionStatus({

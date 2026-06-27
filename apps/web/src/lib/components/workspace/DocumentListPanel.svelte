@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Download, FileText } from "@lucide/svelte";
+  import { Database, Download, FileText } from "@lucide/svelte";
 
   import type { NodeDocument } from "$lib/api/types";
 
@@ -10,6 +10,10 @@
 
   function sourceUrl(documentVersionId: string): string {
     return `/app/source/${encodeURIComponent(documentVersionId)}`;
+  }
+
+  function typedDataUrl(documentVersionId: string): string {
+    return `/app/typed-data/${encodeURIComponent(documentVersionId)}`;
   }
 </script>
 
@@ -56,10 +60,16 @@
               {/if}
             </div>
           </div>
-          <a class="text-button justify-center" href={sourceUrl(document.documentVersionId)}>
-            <Download size={16} aria-hidden="true" />
-            Source
-          </a>
+          <div class="flex flex-wrap gap-2 md:justify-end">
+            <a class="text-button justify-center" href={typedDataUrl(document.documentVersionId)}>
+              <Database size={16} aria-hidden="true" />
+              Typed data
+            </a>
+            <a class="text-button justify-center" href={sourceUrl(document.documentVersionId)}>
+              <Download size={16} aria-hidden="true" />
+              Source
+            </a>
+          </div>
         </article>
       {/each}
     </div>

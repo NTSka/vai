@@ -18,6 +18,27 @@ type ProcessingJob = typeof schema.processingJobs.$inferSelect;
 
 export type ProcessorHandler = (job: ProcessingJob) => Promise<void>;
 
+export class ProcessorExecutionError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly details?: Record<string, unknown>;
+
+  constructor(input: {
+    readonly code: string;
+    readonly message: string;
+    readonly retryable: boolean;
+    readonly details?: Record<string, unknown>;
+  }) {
+    super(input.message);
+    this.name = "ProcessorExecutionError";
+    this.code = input.code;
+    this.retryable = input.retryable;
+    if (input.details) {
+      this.details = input.details;
+    }
+  }
+}
+
 export type ProcessorRegistration = {
   readonly processorId: string;
   readonly jobType: string;
@@ -87,6 +108,7 @@ export function createProcessorRuntime(input: {
         await handler(job);
         return "processed";
       } catch (error) {
+        const classified = classifyProcessorError(error);
         if (job.jobType === "input_file_validation") {
           // Intake owns document set state; preserve uploaded file facts while marking
           // the intake aggregate failed for unexpected validator errors.
@@ -101,17 +123,49 @@ export function createProcessorRuntime(input: {
           organizationId: job.organizationId,
           id: job.id,
           error: {
-            code: "processor_unhandled_error",
-            message: error instanceof Error ? error.message : "Processor failed"
+            code: classified.code,
+            message: classified.message,
+            details: {
+              retryable: classified.retryable,
+              category: classified.category,
+              ...(classified.details ?? {})
+            }
           }
         });
-        await input.processing.retryJob({
-          organizationId: job.organizationId,
-          id: job.id
-        });
+        if (classified.retryable) {
+          await input.processing.retryJob({
+            organizationId: job.organizationId,
+            id: job.id
+          });
+        }
         return "processed";
       }
     }
+  };
+}
+
+function classifyProcessorError(error: unknown): {
+  readonly code: string;
+  readonly message: string;
+  readonly retryable: boolean;
+  readonly category: "transient" | "deterministic";
+  readonly details?: Record<string, unknown>;
+} {
+  if (error instanceof ProcessorExecutionError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      category: error.retryable ? "transient" : "deterministic",
+      ...(error.details ? { details: error.details } : {})
+    };
+  }
+
+  return {
+    code: "processor_unhandled_error",
+    message: error instanceof Error ? error.message : "Processor failed",
+    retryable: false,
+    category: "deterministic"
   };
 }
 

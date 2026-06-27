@@ -137,3 +137,19 @@ export const sourceDocumentMetadataSchema = z.object({
     })
   })
 });
+
+export const typedDataSchema = z.object({
+  organizationId: z.string(),
+  documentVersionId: z.string(),
+  state: z.enum(["available", "not_available"]),
+  records: z.array(
+    z.object({
+      id: z.string(),
+      family: z.enum(["estimate", "drawing", "unknown"]),
+      data: z.record(z.string(), z.unknown()),
+      producedByJobId: z.string().nullable(),
+      createdAt: dateStringSchema,
+      updatedAt: dateStringSchema
+    })
+  )
+});

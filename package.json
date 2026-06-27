@@ -7,7 +7,7 @@
     "dev": "pnpm -r --if-present dev",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm -r --if-present test && pnpm test:db",
     "test:db": "pnpm --filter @vai/backend test:db",
     "lint": "pnpm -r --if-present lint",
     "format": "pnpm -r --if-present format",

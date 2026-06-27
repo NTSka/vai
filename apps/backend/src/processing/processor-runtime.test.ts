@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createProcessorRegistry,
   createProcessorRuntime,
+  ProcessorExecutionError,
   type ProcessorHandler
 } from "./processor-runtime.js";
 import type { ProcessingRepository } from "../infrastructure/persistence/repositories/processing-orchestration.js";
@@ -44,7 +45,7 @@ describe("processor runtime", () => {
     });
   });
 
-  it("retries unhandled processor errors when attempts remain", async () => {
+  it("does not retry unclassified processor errors", async () => {
     const fixture = createRuntimeFixture();
 
     fixture.registry.register({
@@ -56,7 +57,40 @@ describe("processor runtime", () => {
     });
 
     expect(await fixture.runtime.runNext()).toBe("processed");
+    expect(fixture.statuses).toEqual(["failed"]);
+    expect(fixture.errors[0]).toMatchObject({
+      code: "processor_unhandled_error",
+      details: {
+        category: "deterministic",
+        retryable: false
+      }
+    });
+  });
+
+  it("retries explicitly retryable processor errors when attempts remain", async () => {
+    const fixture = createRuntimeFixture();
+
+    fixture.registry.register({
+      processorId: "fixture_processor",
+      jobType: "fixture_job",
+      handler: async () => {
+        throw new ProcessorExecutionError({
+          code: "external_service_unavailable",
+          message: "External service is unavailable",
+          retryable: true
+        });
+      }
+    });
+
+    expect(await fixture.runtime.runNext()).toBe("processed");
     expect(fixture.statuses).toEqual(["failed", "queued"]);
+    expect(fixture.errors[0]).toMatchObject({
+      code: "external_service_unavailable",
+      details: {
+        category: "transient",
+        retryable: true
+      }
+    });
   });
 });
 

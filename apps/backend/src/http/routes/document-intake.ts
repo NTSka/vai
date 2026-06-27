@@ -139,18 +139,11 @@ function createDbPersistUpload(app: FastifyInstance): PersistUpload {
         status: "uploaded"
       });
 
-      const jobType = input.files.some((file) =>
-        isArchiveUpload(file.extension, file.mimeType)
-      )
-        ? "archive_unpacking"
-        : "input_file_validation";
-      const processorId =
-        jobType === "archive_unpacking" ? "archive_unpacker" : "input_file_validator";
       const validationJob = await processing.enqueue({
         organizationId: input.organizationId,
-        processorId,
+        processorId: "input_file_validator",
         processorVersion: "1.0.0",
-        jobType,
+        jobType: "input_file_validation",
         payload: {
           documentSetId: documentSet.id,
           inputFileIds: storedFileIds
@@ -166,21 +159,6 @@ function createDbPersistUpload(app: FastifyInstance): PersistUpload {
         status: "uploaded"
       };
     });
-}
-
-function isArchiveUpload(
-  extension: string | undefined,
-  mimeType: string | undefined
-): boolean {
-  return (
-    extension === ".zip" ||
-    extension === ".rar" ||
-    extension === ".7z" ||
-    mimeType === "application/zip" ||
-    mimeType === "application/x-zip-compressed" ||
-    mimeType === "application/vnd.rar" ||
-    mimeType === "application/x-7z-compressed"
-  );
 }
 
 async function readMultipartFiles(request: FastifyRequest): Promise<UploadableFile[]> {
