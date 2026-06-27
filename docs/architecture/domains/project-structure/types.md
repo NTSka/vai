@@ -31,6 +31,9 @@ document versions attached to it.
   shown. Some document types, such as estimates, may naturally attach to a
   higher-level project, object, subobject, or stage node instead of the deepest
   parsed branch.
+- Placement rules are standard-specific. For the first implementation, the
+  concrete node path and target-node selection should be defined by the
+  supported GOST/document-code standard instead of hardcoded globally.
 - A node-to-document relationship is many-to-many over time: one node can contain
   multiple document versions, and one document version may later appear in more
   than one projection if explicit domain rules require it.
@@ -202,9 +205,9 @@ organization-specific rules require an explicit placeholder.
 `project` node key.
 
 The placement target is not always the deepest parsed node. It should be chosen
-by the placement rules for the applicable standard and document type. For
-example, a drawing may attach to a mark or document group, while an estimate may
-attach to a project, object, subobject, or stage node.
+by the placement rules for the applicable GOST/document-code standard and
+document type. For example, a drawing may attach to a mark or document group,
+while an estimate may attach to a project, object, subobject, or stage node.
 
 ## Relationship Inputs
 
@@ -228,9 +231,11 @@ separate domain rule explicitly promotes a reference to a placement.
 
 - Should project structure nodes be rebuilt from identities or updated
   incrementally as processing jobs complete?
-- Which node should each document type attach to for each supported standard?
+- Which GOST/document-code standards are supported in the first implementation?
+- Which node should each document type attach to for each supported
+  GOST/document-code standard?
 - Which code levels correspond to object/subobject/package semantics for each
-  supported standard?
+  supported GOST/document-code standard?
 - Should reference-code relationships be modeled here or in a later document
   relationship domain?
 - How should user-corrected identity parts affect existing nodes and placements?

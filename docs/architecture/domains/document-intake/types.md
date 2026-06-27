@@ -15,9 +15,9 @@ extraction, or processing artifacts.
 - Original uploaded files must be preserved.
 - A document set may contain files that later expand into multiple documents or
   document units.
-- Archive structure and extracted-file provenance are not modeled here. Later,
-  the document registry should connect created documents to both the source
-  `DocumentSet` and the relevant `StoredFile`.
+- Full archive structure is not modeled here. Extracted-file provenance is
+  modeled minimally so generated stored files can be traced back to the uploaded
+  archive and document set that produced them.
 
 ## Identifiers
 
@@ -152,9 +152,33 @@ type StoredFilePurpose =
   | "export";
 ```
 
+## StoredFileProvenance
+
+`StoredFileProvenance` records the minimal lineage needed for files produced
+during intake. The first use case is archive extraction.
+
+```ts
+interface StoredFileProvenance {
+  childFileId: StoredFileID;
+  sourceFileId: StoredFileID;
+  documentSetId: DocumentSetID;
+
+  relation: StoredFileProvenanceRelation;
+
+  pathInSource?: string;
+
+  createdAt: Date;
+}
+```
+
+```ts
+type StoredFileProvenanceRelation =
+  | "extracted_from_archive";
+```
+
 ## Out of Scope
 
-- Modeling archive internal structure beyond intake input/output file links.
+- Modeling full archive internal structure beyond extracted-file provenance.
 - Creating `Document` records from files.
 - Tracking document versions.
 - Extracting document codes.

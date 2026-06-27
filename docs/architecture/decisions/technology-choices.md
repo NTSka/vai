@@ -1,7 +1,6 @@
 # Technology Choices
 
-This document summarizes MVP technology choices and the remaining decisions
-needed before implementation.
+This document summarizes MVP technology choices.
 
 ## Accepted Choices
 
@@ -27,6 +26,15 @@ needed before implementation.
 | XLSX processing | `exceljs` in the TypeScript worker |
 | Auth | JWT + Argon2 |
 | Frontend UI base | Bits UI + Tailwind |
+| OpenAPI integration | Zod-based OpenAPI tooling |
+| Drizzle migrations | Drizzle Kit |
+| JWT transport | httpOnly cookie for web |
+| JWT shape | access + refresh |
+| Local object storage | MinIO container |
+| Python gRPC codegen layout | shared proto package |
+| Worker concurrency | fixed config per processor |
+| Progress projection | persisted projection |
+| API client generation | generated or checked TS client |
 | Backend tests | Vitest + Fastify inject |
 | Frontend E2E tests | Playwright |
 | Python tests | pytest |
@@ -59,22 +67,6 @@ interface EventBus {
 Future replacements may include RabbitMQ, NATS JetStream, Kafka, a managed
 queue, or a workflow runtime. Domain modules and processors should not depend on
 the concrete implementation.
-
-## Remaining Choices
-
-These decisions can be made during scaffolding or early implementation:
-
-| Area | Options | Recommended default |
-| --- | --- | --- |
-| OpenAPI integration | Zod-based OpenAPI tooling, manual OpenAPI | Zod-based tooling |
-| Drizzle migrations | Drizzle Kit, custom SQL migrations | Drizzle Kit |
-| JWT transport | Authorization header, httpOnly cookie | httpOnly cookie for web |
-| JWT shape | access token only, access + refresh | access + refresh |
-| Local object storage | MinIO container, filesystem adapter | MinIO container |
-| Python gRPC codegen layout | generated in service only, shared proto package | shared proto package |
-| Worker concurrency | fixed config, dynamic per processor | fixed config per processor |
-| Progress projection | computed on read, persisted projection | persisted projection |
-| API client generation | generated TS client, typed fetch wrapper | generated or checked TS client |
 
 ## Notes
 

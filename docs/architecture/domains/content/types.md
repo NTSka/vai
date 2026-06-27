@@ -16,9 +16,10 @@ capability results.
 - For PDF files, content processing may use CV to locate relevant regions, plan
   OCR candidates, run targeted OCR, and reconstruct tables.
 - Full-page OCR is not a default strategy.
-- The domain should produce raw or semi-structured content artifacts, not final
-  parsed document codes or business data.
-- Document identification decides how to parse and interpret code candidates.
+- The domain should produce raw or semi-structured content artifacts, not
+  document-code candidates, parsed document codes, or business data.
+- Typed document data extracts document-type-specific source fields. Document
+  identity decides how to interpret those fields as own or reference codes.
 - XLSX content processing exposes workbook cells as content artifacts. It does
   not detect estimate table ranges; that belongs to typed estimate processing.
 
@@ -106,11 +107,8 @@ XLSX pipeline:
 ```text
 xlsx_workbook_extraction
   -> xlsx_cell_extraction
-  -> document identification
-
-xlsx_workbook_extraction
-  -> xlsx_cell_extraction
   -> typed document data extraction
+  -> document identification
 ```
 
 ## ContentArtifact
@@ -155,9 +153,7 @@ type ContentArtifactKind =
   | "table"
   | "cell"
   | "ocr_candidate"
-  | "ocr_text"
-  | "code_candidate"
-  | "reference_code_candidate";
+  | "ocr_text";
 ```
 
 ```ts
@@ -174,9 +170,7 @@ type ContentArtifactPayload =
   | TableContentPayload
   | CellContentPayload
   | OcrCandidatePayload
-  | OcrTextPayload
-  | CodeCandidatePayload
-  | ReferenceCodeCandidatePayload;
+  | OcrTextPayload;
 ```
 
 ```ts
@@ -269,21 +263,6 @@ interface OcrTextPayload {
 ```
 
 ```ts
-interface CodeCandidatePayload {
-  value: string;
-  sourceArtifactIds: ContentArtifactID[];
-  candidateKind?: string;
-}
-```
-
-```ts
-interface ReferenceCodeCandidatePayload {
-  value: string;
-  sourceArtifactIds: ContentArtifactID[];
-  relationHint?: string;
-}
-```
-
 ## ContentLocation
 
 ```ts
@@ -321,6 +300,7 @@ interface BoundingBox {
 
 ## Out of Scope
 
+- Producing document-code candidates.
 - Parsing standardized document codes.
 - Determining final document purpose from a code.
 - Project-structure placement.
@@ -329,7 +309,5 @@ interface BoundingBox {
 
 ## Open Questions
 
-- Should `code_candidate` and `reference_code_candidate` be produced here, or
-  should all code candidate extraction live in document identification?
 - Which content payload schemas should be stored inline from day one, and which
   should be stored through `payloadRef`?

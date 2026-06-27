@@ -89,8 +89,15 @@ type DocumentVersionStatus =
   | "registered"
   | "processing"
   | "ready"
-  | "failed";
+  | "failed"
+  | "unsupported";
 ```
+
+`unsupported` means the version is registered and visible, but the baseline
+processing pipeline cannot continue with the current processor set or supported
+file formats. Domain uncertainty such as an unknown document type or missing
+identity should normally be represented by downstream domain facts and warnings,
+not by this status.
 
 ## Out of Scope
 
@@ -106,5 +113,3 @@ type DocumentVersionStatus =
 
 - Should multi-document files be represented by multiple `Document` records from
   one `StoredFile`, or should the model introduce `DocumentUnit` first?
-- Which status transitions belong to document registry and which belong to
-  processing domains?
