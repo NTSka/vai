@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest";
+
+import { loadBackendConfig } from "./config.js";
+
+const requiredEnv = {
+  DATABASE_URL: "postgres://vai2:vai2_password@localhost:5432/vai2",
+  S3_ENDPOINT: "http://localhost:9000",
+  S3_REGION: "us-east-1",
+  S3_BUCKET: "vai-local-files",
+  S3_ACCESS_KEY_ID: "minioadmin",
+  S3_SECRET_ACCESS_KEY: "minioadmin",
+  JWT_ACCESS_SECRET: "test-access-secret",
+  JWT_REFRESH_SECRET: "test-refresh-secret",
+  CV_OCR_SERVICE_URL: "localhost:50051"
+};
+
+describe("backend config", () => {
+  it("rejects invalid boolean env values", () => {
+    expect(() =>
+      loadBackendConfig({
+        ...requiredEnv,
+        S3_FORCE_PATH_STYLE: "treu"
+      })
+    ).toThrow("Invalid backend configuration");
+  });
+
+  it("parses explicit false boolean env values", () => {
+    const config = loadBackendConfig({
+      ...requiredEnv,
+      S3_FORCE_PATH_STYLE: "false"
+    });
+
+    expect(config.objectStorage.forcePathStyle).toBe(false);
+  });
+});
