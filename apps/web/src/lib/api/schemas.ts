@@ -99,7 +99,7 @@ export const nodeDocumentSchema = z.object({
   placementStatus: z.enum(["placed", "ambiguous", "unplaced"]).nullable(),
   typeResolution: z
     .object({
-      family: z.enum(["estimate", "drawing", "unknown"]),
+      family: z.enum(["estimate", "drawing", "statement", "unsupported", "unknown"]),
       confidence: z.string()
     })
     .nullable()
@@ -145,7 +145,7 @@ export const typedDataSchema = z.object({
   records: z.array(
     z.object({
       id: z.string(),
-      family: z.enum(["estimate", "drawing", "unknown"]),
+      family: z.enum(["estimate", "drawing", "statement", "unsupported", "unknown"]),
       data: z.record(z.string(), z.unknown()),
       producedByJobId: z.string().nullable(),
       createdAt: dateStringSchema,

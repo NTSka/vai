@@ -11,6 +11,9 @@ export const projectStructureNodeKind = pgEnum("project_structure_node_kind", [
   "complex_part_kind",
   "complex_part_number",
   "building",
+  "documentation_section",
+  "documentation_subsection",
+  "documentation_volume",
   "stage",
   "mark",
   "document_group"
@@ -22,6 +25,8 @@ export const projectStructureNodeSubject = pgEnum(
     "project",
     "object",
     "subobject",
+    "documentation_section",
+    "documentation_volume",
     "discipline_or_mark",
     "document_package",
     "document_group"

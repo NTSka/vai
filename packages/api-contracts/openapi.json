@@ -962,6 +962,8 @@
                                     "enum": [
                                       "estimate",
                                       "drawing",
+                                      "statement",
+                                      "unsupported",
                                       "unknown"
                                     ]
                                   },
@@ -1394,6 +1396,8 @@
                             "enum": [
                               "estimate",
                               "drawing",
+                              "statement",
+                              "unsupported",
                               "unknown"
                             ]
                           },

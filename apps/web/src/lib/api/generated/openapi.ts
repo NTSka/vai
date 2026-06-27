@@ -651,7 +651,7 @@ export interface paths {
                                 placementStatus: ("placed" | "ambiguous" | "unplaced") | (null);
                                 typeResolution: {
                                     /** @enum {string} */
-                                    family: "estimate" | "drawing" | "unknown";
+                                    family: "estimate" | "drawing" | "statement" | "unsupported" | "unknown";
                                     confidence: string;
                                 } | (null);
                             }[];
@@ -857,7 +857,7 @@ export interface paths {
                             records: {
                                 id: string;
                                 /** @enum {string} */
-                                family: "estimate" | "drawing" | "unknown";
+                                family: "estimate" | "drawing" | "statement" | "unsupported" | "unknown";
                                 data: {
                                     [key: string]: unknown;
                                 };

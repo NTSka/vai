@@ -25,12 +25,14 @@ export const detectedFileFormat = pgEnum("detected_file_format", [
 export const documentTypeFamily = pgEnum("document_type_family", [
   "estimate",
   "drawing",
+  "statement",
+  "unsupported",
   "unknown"
 ]);
 
 export const documentIdentityParseStatus = pgEnum(
   "document_identity_parse_status",
-  ["parsed", "missing", "unsupported"]
+  ["parsed", "invalid", "missing", "unsupported"]
 );
 
 export const fileFormatDetections = pgTable(
@@ -187,17 +189,23 @@ export const documentIdentities = pgTable(
       .notNull()
       .references(() => documentVersions.id, { onDelete: "cascade" }),
     role: text("role").notNull(),
+    identityKey: text("identity_key").notNull(),
     normalizedValue: text("normalized_value"),
     parseStatus: documentIdentityParseStatus("parse_status").notNull(),
     parsedParts: jsonb("parsed_parts").$type<Record<string, unknown>>().notNull(),
+    sourceTypedDataRecordIds: jsonb("source_typed_data_record_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
     producedByJobId: uuid("produced_by_job_id").references(() => processingJobs.id),
     ...timestamps
   },
   (table) => [
-    uniqueIndex("document_identities_org_version_role_unique").on(
+    uniqueIndex("document_identities_org_version_role_key_unique").on(
       table.organizationId,
       table.documentVersionId,
-      table.role
+      table.role,
+      table.identityKey
     ),
     foreignKey({
       name: "document_identities_document_same_org_fk",

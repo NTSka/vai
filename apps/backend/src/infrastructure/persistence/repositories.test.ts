@@ -1087,6 +1087,284 @@ describe("Phase 7 baseline processing skeleton", () => {
       code: "document_identity_unplaced"
     });
   });
+
+  dbIt("places a parsed GOST drawing own-code under stable project stage and mark nodes", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-001-R-AR-drawing.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const nodes = await database
+      .select()
+      .from(schema.projectStructureNodes)
+      .where(eq(schema.projectStructureNodes.organizationId, context.organization.id));
+    const [placement] = await database
+      .select()
+      .from(schema.projectStructurePlacements)
+      .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const project = nodes.find((node) => node.kind === "project");
+    const stage = nodes.find((node) => node.kind === "stage");
+    const mark = nodes.find((node) => node.kind === "mark");
+
+    expect(project).toMatchObject({ key: "PRJ" });
+    expect(stage).toMatchObject({ key: "R", parentId: project?.id });
+    expect(mark).toMatchObject({ key: "AR", parentId: stage?.id });
+    expect(placement).toMatchObject({
+      status: "placed",
+      nodeId: mark?.id
+    });
+  });
+
+  dbIt("places project-documentation package identities under section and volume nodes", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-P-SEC05-VOL2-project.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const nodes = await database
+      .select()
+      .from(schema.projectStructureNodes)
+      .where(eq(schema.projectStructureNodes.organizationId, context.organization.id));
+    const [placement] = await database
+      .select()
+      .from(schema.projectStructurePlacements)
+      .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const project = nodes.find((node) => node.kind === "project");
+    const section = nodes.find((node) => node.kind === "documentation_section");
+    const volume = nodes.find((node) => node.kind === "documentation_volume");
+
+    expect(project).toMatchObject({ key: "PRJ" });
+    expect(section).toMatchObject({ key: "05", parentId: project?.id });
+    expect(volume).toMatchObject({ key: "2", parentId: section?.id });
+    expect(placement).toMatchObject({
+      status: "placed",
+      nodeId: volume?.id
+    });
+  });
+
+  dbIt("persists ambiguous placement when parsed code lacks required stage context", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-001-AR-drawing.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const [placement] = await database
+      .select()
+      .from(schema.projectStructurePlacements)
+      .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const [summary] = await database
+      .select()
+      .from(schema.baselineProcessingResults)
+      .where(eq(schema.baselineProcessingResults.documentSetId, context.documentSet.id));
+
+    expect(placement).toMatchObject({ status: "ambiguous" });
+    expect(summary).toMatchObject({
+      status: "completed_with_warnings",
+      warnings: [expect.objectContaining({ code: "project_structure_placement_ambiguous" })]
+    });
+  });
+
+  dbIt("persists estimate reference identities without using them for placement", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const xlsxContent = await createWorkbookFixture();
+    const context = await createDocumentContext(database, {
+      originalName: "estimate.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const fixture = createBaselinePipelineFixture(database, {
+      objectStorage: createObjectStorageDouble(xlsxContent)
+    });
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const identities = await database
+      .select()
+      .from(schema.documentIdentities)
+      .where(eq(schema.documentIdentities.organizationId, context.organization.id));
+    const [placement] = await database
+      .select()
+      .from(schema.projectStructurePlacements)
+      .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const ownIdentity = identities.find((identity) => identity.role === "own_code");
+    const referenceIdentity = identities.find(
+      (identity) => identity.role === "reference_code"
+    );
+    const referenceIdentities = identities.filter(
+      (identity) => identity.role === "reference_code"
+    );
+    const [estimateTypedData] = await database
+      .select()
+      .from(schema.typedDataRecords)
+      .where(
+        and(
+          eq(schema.typedDataRecords.organizationId, context.organization.id),
+          eq(schema.typedDataRecords.family, "estimate")
+        )
+      );
+
+    expect(ownIdentity).toMatchObject({ parseStatus: "missing" });
+    expect(referenceIdentities.map((identity) => identity.normalizedValue).sort()).toEqual([
+      "PRJ-002",
+      "PRJ-003-R-AR"
+    ]);
+    expect(referenceIdentity).toMatchObject({ parseStatus: "parsed" });
+    expect(referenceIdentities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceTypedDataRecordIds: [estimateTypedData?.id],
+          parsedParts: expect.objectContaining({
+            sourceTypedDataRecordIds: [estimateTypedData?.id]
+          })
+        })
+      ])
+    );
+    expect(placement).toMatchObject({
+      status: "unplaced",
+      placedByIdentityId: ownIdentity?.id
+    });
+  });
+
+  dbIt("does not promote standalone statement row references to source own identity", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const xlsxContent = await createWorkbookFixture();
+    const context = await createDocumentContext(database, {
+      originalName: "statement.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const fixture = createBaselinePipelineFixture(database, {
+      objectStorage: createObjectStorageDouble(xlsxContent)
+    });
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const identities = await database
+      .select()
+      .from(schema.documentIdentities)
+      .where(eq(schema.documentIdentities.organizationId, context.organization.id));
+    const [placement] = await database
+      .select()
+      .from(schema.projectStructurePlacements)
+      .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const ownIdentity = identities.find((identity) => identity.role === "own_code");
+    const referenceIdentities = identities.filter(
+      (identity) => identity.role === "reference_code"
+    );
+
+    expect(ownIdentity).toMatchObject({ parseStatus: "missing" });
+    expect(referenceIdentities.map((identity) => identity.normalizedValue).sort()).toEqual([
+      "PRJ-002",
+      "PRJ-003-R-AR"
+    ]);
+    expect(referenceIdentities[0]?.parsedParts).toMatchObject({
+      sourceReferences: [
+        expect.objectContaining({
+          artifactType: "xlsx_cells",
+          kind: "content_artifact_cell"
+        })
+      ]
+    });
+    expect(placement).toMatchObject({
+      status: "unplaced",
+      placedByIdentityId: ownIdentity?.id
+    });
+  });
 });
 
 describe("Phase 8 backend read APIs", () => {
@@ -1516,9 +1794,11 @@ async function createReadApiHttpFixture(database: TestDb) {
     documentId: context.document.id,
     documentVersionId: context.version.id,
     role: "own_code",
+    identityKey: "own_code:parsed:PRJ-001:0",
     normalizedValue: "PRJ-001",
     parseStatus: "parsed",
     parsedParts: { project: "PRJ" },
+    sourceTypedDataRecordIds: [],
     producedByJobId: job.id
   });
   const node = await projectStructure.findOrCreateNode({
@@ -1600,6 +1880,7 @@ async function createWorkbookFixture(): Promise<Uint8Array> {
   estimate.getCell("B1").value = "Quantity";
   estimate.getCell("A2").value = "PRJ-002";
   estimate.getCell("B2").value = 42;
+  estimate.getCell("A3").value = "PRJ-003-R-AR";
   const meta = workbook.addWorksheet("Meta");
   meta.getCell("A1").value = true;
 

@@ -765,6 +765,13 @@ Deliverables:
 - Parsed own-code identities create project structure nodes.
 - Unsupported or uncertain semantic outcomes remain visible with warnings.
 
+Implementation note:
+
+- The executable MVP baseline for this phase is documented in
+  [`phase12-semantic-baseline.md`](./phase12-semantic-baseline.md). It defines
+  the supported code shapes, source fields, identity outcomes, and placement
+  rules used by the current processors.
+
 Definition of done:
 
 - Fixture tests cover representative GOST codes.

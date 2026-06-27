@@ -27,6 +27,13 @@ import {
   type XlsxCellCollectionPayload,
   type XlsxCellPayloadStorage
 } from "./xlsx-artifacts.js";
+import {
+  buildEmbeddedStatementPayload,
+  buildIdentityInputs as buildSemanticIdentityInputs,
+  buildMissingOwnIdentityInput as buildSemanticMissingOwnIdentityInput,
+  buildTypedDataPayload as buildSemanticTypedDataPayload,
+  inferFamily as inferSemanticFamily
+} from "./semantic-baseline.js";
 
 type ProcessingJob = typeof schema.processingJobs.$inferSelect;
 type DomainEvent = typeof schema.domainEvents.$inferSelect;
@@ -549,13 +556,13 @@ async function executeDocumentTypeResolution(
     return;
   }
 
-  const family = inferFamily(storedFile.originalName);
+  const family = inferSemanticFamily(storedFile.originalName);
   await input.baselineFacts.upsertDocumentTypeResolution({
     organizationId: job.organizationId,
     documentVersionId: payload.documentVersionId,
     family,
-    confidence: family === "unknown" ? "low" : "placeholder",
-    alternatives: family === "unknown" ? ["drawing", "estimate"] : [],
+    confidence: family === "unknown" ? "low" : "semantic_baseline",
+    alternatives: family === "unknown" ? ["drawing", "estimate", "statement"] : [],
     producedByJobId: job.id
   });
   await completeJobAndPublishEvents(input.processing, job, [
@@ -586,16 +593,40 @@ async function executeTypedDataExtraction(
   }
 
   const stem = path.basename(storedFile.originalName, path.extname(storedFile.originalName));
-  await input.baselineFacts.upsertTypedDataRecord({
+  const contentArtifacts = await input.baselineFacts.listContentArtifacts({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+  const typedData = buildSemanticTypedDataPayload({
+    family: resolution.family,
+    originalName: storedFile.originalName,
+    stem,
+    contentArtifacts
+  });
+  const primaryTypedDataRecord = await input.baselineFacts.upsertTypedDataRecord({
     organizationId: job.organizationId,
     documentVersionId: payload.documentVersionId,
     family: resolution.family,
-    data: {
-      ownCodeCandidate: extractOwnCodeCandidate(stem),
-      source: "filename_placeholder"
-    },
+    data: typedData,
     producedByJobId: job.id
   });
+  if (resolution.family === "drawing") {
+    const embeddedStatement = buildEmbeddedStatementPayload({
+      sourceTypedDataRecordId: primaryTypedDataRecord.id,
+      originalName: storedFile.originalName,
+      stem,
+      contentArtifacts
+    });
+    if (embeddedStatement) {
+      await input.baselineFacts.upsertTypedDataRecord({
+        organizationId: job.organizationId,
+        documentVersionId: payload.documentVersionId,
+        family: "statement",
+        data: embeddedStatement,
+        producedByJobId: job.id
+      });
+    }
+  }
   await completeJobAndPublishEvents(input.processing, job, [
     buildVersionEvent(job, "typed_data.extracted", payload)
   ]);
@@ -614,38 +645,62 @@ async function executeDocumentIdentityResolution(
     organizationId: job.organizationId,
     id: payload.documentVersionId
   });
-  const typedData = await input.baselineFacts.findTypedDataRecord({
+  const typedDataRecords = await input.baselineFacts.listTypedDataRecords({
     organizationId: job.organizationId,
     documentVersionId: payload.documentVersionId
   });
-  if (!version || !typedData) {
+  if (!version || typedDataRecords.length === 0) {
+    await failJob(input.processing, job, "identity_inputs_missing", payload);
+    return;
+  }
+  const primaryTypedDataRecord = typedDataRecords[0];
+  if (!primaryTypedDataRecord) {
     await failJob(input.processing, job, "identity_inputs_missing", payload);
     return;
   }
 
-  const ownCodeCandidate = typedData.data["ownCodeCandidate"];
-  const normalizedValue =
-    typeof ownCodeCandidate === "string" && ownCodeCandidate.length > 0
-      ? ownCodeCandidate
-      : undefined;
-  const identity = await input.baselineFacts.upsertDocumentIdentity({
+  const identityInputs = typedDataRecords.flatMap((typedData) =>
+    buildSemanticIdentityInputs(typedData.data, typedData.id)
+  );
+  const ownIdentityInput =
+    identityInputs.find((candidate) => candidate.role === "own_code") ??
+    buildSemanticMissingOwnIdentityInput(primaryTypedDataRecord.id);
+  const ownIdentity = await input.baselineFacts.upsertDocumentIdentity({
     organizationId: job.organizationId,
     documentId: version.documentId,
     documentVersionId: payload.documentVersionId,
-    role: "own",
-    normalizedValue,
-    parseStatus: normalizedValue ? "parsed" : "missing",
-    parsedParts: normalizedValue ? parseCodeParts(normalizedValue) : {},
+    role: ownIdentityInput.role,
+    identityKey: ownIdentityInput.identityKey,
+    normalizedValue: ownIdentityInput.normalizedValue,
+    parseStatus: ownIdentityInput.parseStatus,
+    parsedParts: ownIdentityInput.parsedParts,
+    sourceTypedDataRecordIds: [...ownIdentityInput.sourceTypedDataRecordIds],
     producedByJobId: job.id
   });
+  for (const referenceIdentityInput of identityInputs.filter(
+    (candidate) => candidate.role === "reference_code"
+  )) {
+    await input.baselineFacts.upsertDocumentIdentity({
+      organizationId: job.organizationId,
+      documentId: version.documentId,
+      documentVersionId: payload.documentVersionId,
+      role: referenceIdentityInput.role,
+      identityKey: referenceIdentityInput.identityKey,
+      normalizedValue: referenceIdentityInput.normalizedValue,
+      parseStatus: referenceIdentityInput.parseStatus,
+      parsedParts: referenceIdentityInput.parsedParts,
+      sourceTypedDataRecordIds: [...referenceIdentityInput.sourceTypedDataRecordIds],
+      producedByJobId: job.id
+    });
+  }
   await completeJobAndPublishEvents(input.processing, job, [
     {
     type: "document_identity.resolved",
     version: "1",
     source: "document-identity",
     aggregateType: "document_identity",
-    aggregateId: identity.id,
-    payload: { ...payload, organizationId: job.organizationId, documentIdentityId: identity.id },
+    aggregateId: ownIdentity.id,
+    payload: { ...payload, organizationId: job.organizationId, documentIdentityId: ownIdentity.id },
     causationId: job.id,
     ...(job.correlationId ? { correlationId: job.correlationId } : {})
     }
@@ -663,23 +718,19 @@ async function executeProjectStructureProjection(
   job: ProcessingJob
 ): Promise<void> {
   const payload = parseJobPayload(documentIdentityPayloadSchema, job);
-  const identity = await input.baselineFacts.findDocumentIdentity({
+  const identity = await input.baselineFacts.findDocumentIdentityById({
     organizationId: job.organizationId,
-    documentVersionId: payload.documentVersionId
+    id: payload.documentIdentityId
   });
   if (!identity) {
     await failJob(input.processing, job, "document_identity_not_found", payload);
     return;
   }
 
-  const nodeKey = identity.normalizedValue?.split("-")[0] ?? "unplaced";
-  const node = await input.projectStructure.findOrCreateNode({
+  const node = await findOrCreatePlacementNode({
+    projectStructure: input.projectStructure,
     organizationId: job.organizationId,
-    kind: identity.parseStatus === "parsed" ? "project" : "document_group",
-    key: nodeKey,
-    title: identity.parseStatus === "parsed" ? nodeKey : "Unplaced documents",
-    subject: identity.parseStatus === "parsed" ? "project" : "document_group",
-    sourceIdentityIds: [identity.id]
+    identity
   });
   const placement = await input.projectStructure.createOrUpdatePlacement({
     organizationId: job.organizationId,
@@ -687,7 +738,7 @@ async function executeProjectStructureProjection(
     documentVersionId: payload.documentVersionId,
     placedByIdentityId: identity.id,
     nodeId: node.id,
-    status: identity.parseStatus === "parsed" ? "placed" : "unplaced",
+    status: placementStatusForIdentity(identity),
     producedByJobId: job.id
   });
 
@@ -765,12 +816,26 @@ async function executeBaselineSummary(
         }
       ];
     }
-    const identity = identities.find((candidate) => candidate.documentVersionId === version.id);
+    const identity = identities.find(
+      (candidate) => candidate.documentVersionId === version.id && candidate.role === "own_code"
+    );
     if (identity && identity.parseStatus !== "parsed") {
       return [
         {
           code: "document_identity_unplaced",
           message: "Document identity could not be parsed for placement",
+          documentVersionId: version.id
+        }
+      ];
+    }
+    const placement = placements.find(
+      (candidate) => candidate.documentVersionId === version.id
+    );
+    if (placement?.status === "ambiguous") {
+      return [
+        {
+          code: "project_structure_placement_ambiguous",
+          message: "Document placement is ambiguous and requires review",
           documentVersionId: version.id
         }
       ];
@@ -889,29 +954,126 @@ function detectFormat(file: {
   return "unsupported";
 }
 
-function inferFamily(originalName: string): "estimate" | "drawing" | "unknown" {
-  const lower = originalName.toLowerCase();
-  if (lower.includes("estimate") || lower.includes("smeta")) return "estimate";
-  if (lower.includes("drawing") || lower.endsWith(".pdf")) return "drawing";
-  return "unknown";
-}
-
-function extractOwnCodeCandidate(value: string): string | undefined {
-  const normalized = value.trim().replace(/\s+/g, "-").toUpperCase();
-  if (!/[0-9]/.test(normalized) || !/[-_.]/.test(value)) {
-    return undefined;
+async function findOrCreatePlacementNode(input: {
+  readonly projectStructure: ProjectStructureRepository;
+  readonly organizationId: string;
+  readonly identity: typeof schema.documentIdentities.$inferSelect;
+}): Promise<typeof schema.projectStructureNodes.$inferSelect> {
+  if (input.identity.role !== "own_code" || input.identity.parseStatus !== "parsed") {
+    return input.projectStructure.findOrCreateNode({
+      organizationId: input.organizationId,
+      kind: "document_group",
+      key: "unplaced",
+      title: "Unplaced documents",
+      subject: "document_group",
+      sourceIdentityIds: [input.identity.id]
+    });
   }
 
-  return normalized.length > 0 ? normalized : undefined;
+  const projectCode = readString(input.identity.parsedParts["projectCode"]);
+  if (!projectCode) {
+    return input.projectStructure.findOrCreateNode({
+      organizationId: input.organizationId,
+      kind: "document_group",
+      key: "unplaced",
+      title: "Unplaced documents",
+      subject: "document_group",
+      sourceIdentityIds: [input.identity.id]
+    });
+  }
+
+  let current = await input.projectStructure.findOrCreateNode({
+    organizationId: input.organizationId,
+    kind: "project",
+    key: projectCode,
+    title: projectCode,
+    subject: "project",
+    sourceIdentityIds: [input.identity.id]
+  });
+
+  const stage = readString(input.identity.parsedParts["stage"]);
+  if (stage === "P") {
+    const sectionNumber = readString(input.identity.parsedParts["sectionNumber"]);
+    if (sectionNumber) {
+      current = await input.projectStructure.findOrCreateNode({
+        organizationId: input.organizationId,
+        kind: "documentation_section",
+        key: sectionNumber,
+        title: `Section ${sectionNumber}`,
+        subject: "documentation_section",
+        parentId: current.id,
+        sourceIdentityIds: [input.identity.id]
+      });
+    }
+
+    const subsectionTitle = readString(input.identity.parsedParts["subsectionTitle"]);
+    if (subsectionTitle) {
+      current = await input.projectStructure.findOrCreateNode({
+        organizationId: input.organizationId,
+        kind: "documentation_subsection",
+        key: subsectionTitle,
+        title: subsectionTitle,
+        subject: "documentation_section",
+        parentId: current.id,
+        sourceIdentityIds: [input.identity.id]
+      });
+    }
+
+    const volumeNumber = readString(input.identity.parsedParts["volumeNumber"]);
+    if (volumeNumber) {
+      current = await input.projectStructure.findOrCreateNode({
+        organizationId: input.organizationId,
+        kind: "documentation_volume",
+        key: volumeNumber,
+        title: `Volume ${volumeNumber}`,
+        subject: "documentation_volume",
+        parentId: current.id,
+        sourceIdentityIds: [input.identity.id]
+      });
+    }
+
+    return current;
+  }
+
+  if (stage) {
+    current = await input.projectStructure.findOrCreateNode({
+      organizationId: input.organizationId,
+      kind: "stage",
+      key: stage,
+      title: stage,
+      subject: "document_package",
+      parentId: current.id,
+      sourceIdentityIds: [input.identity.id]
+    });
+  }
+
+  const mark = readString(input.identity.parsedParts["mark"]);
+  if (mark) {
+    current = await input.projectStructure.findOrCreateNode({
+      organizationId: input.organizationId,
+      kind: "mark",
+      key: mark,
+      title: mark,
+      subject: "discipline_or_mark",
+      parentId: current.id,
+      sourceIdentityIds: [input.identity.id]
+    });
+  }
+
+  return current;
 }
 
-function parseCodeParts(value: string): Record<string, unknown> {
-  const parts = value.split("-").filter(Boolean);
-  return {
-    raw: value,
-    project: parts[0] ?? value,
-    segments: parts
-  };
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function placementStatusForIdentity(
+  identity: typeof schema.documentIdentities.$inferSelect
+): "placed" | "ambiguous" | "unplaced" {
+  if (identity.role !== "own_code" || identity.parseStatus !== "parsed") {
+    return "unplaced";
+  }
+  return readString(identity.parsedParts["placementAmbiguityCode"]) ? "ambiguous" : "placed";
 }
 
 async function persistFailedXlsxTechnicalOutcome(

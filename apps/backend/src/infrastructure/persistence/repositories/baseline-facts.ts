@@ -42,6 +42,10 @@ export type BaselineFactsRepository = {
     readonly documentVersionId: string;
     readonly artifactType: string;
   }): Promise<typeof schema.contentArtifacts.$inferSelect | undefined>;
+  listContentArtifacts(input: {
+    readonly organizationId: string;
+    readonly documentVersionId: string;
+  }): Promise<ReadonlyArray<typeof schema.contentArtifacts.$inferSelect>>;
   upsertDocumentTypeResolution(
     input: typeof schema.documentTypeResolutions.$inferInsert
   ): Promise<typeof schema.documentTypeResolutions.$inferSelect>;
@@ -66,6 +70,10 @@ export type BaselineFactsRepository = {
   findDocumentIdentity(input: {
     readonly organizationId: string;
     readonly documentVersionId: string;
+  }): Promise<typeof schema.documentIdentities.$inferSelect | undefined>;
+  findDocumentIdentityById(input: {
+    readonly organizationId: string;
+    readonly id: string;
   }): Promise<typeof schema.documentIdentities.$inferSelect | undefined>;
   listDocumentIdentitiesForSet(input: {
     readonly organizationId: string;
@@ -223,6 +231,19 @@ export function createBaselineFactsRepository(db: Db): BaselineFactsRepository {
       return artifact;
     },
 
+    async listContentArtifacts(input) {
+      return db
+        .select()
+        .from(schema.contentArtifacts)
+        .where(
+          and(
+            eq(schema.contentArtifacts.organizationId, input.organizationId),
+            eq(schema.contentArtifacts.documentVersionId, input.documentVersionId)
+          )
+        )
+        .orderBy(asc(schema.contentArtifacts.artifactType), asc(schema.contentArtifacts.id));
+    },
+
     async upsertDocumentTypeResolution(input) {
       const [resolution] = await db
         .insert(schema.documentTypeResolutions)
@@ -317,12 +338,14 @@ export function createBaselineFactsRepository(db: Db): BaselineFactsRepository {
           target: [
             schema.documentIdentities.organizationId,
             schema.documentIdentities.documentVersionId,
-            schema.documentIdentities.role
+            schema.documentIdentities.role,
+            schema.documentIdentities.identityKey
           ],
           set: {
             normalizedValue: input.normalizedValue,
             parseStatus: input.parseStatus,
             parsedParts: input.parsedParts,
+            sourceTypedDataRecordIds: input.sourceTypedDataRecordIds,
             producedByJobId: input.producedByJobId,
             updatedAt: new Date()
           }
@@ -340,6 +363,21 @@ export function createBaselineFactsRepository(db: Db): BaselineFactsRepository {
           and(
             eq(schema.documentIdentities.organizationId, input.organizationId),
             eq(schema.documentIdentities.documentVersionId, input.documentVersionId)
+          )
+        )
+        .limit(1);
+
+      return identity;
+    },
+
+    async findDocumentIdentityById(input) {
+      const [identity] = await db
+        .select()
+        .from(schema.documentIdentities)
+        .where(
+          and(
+            eq(schema.documentIdentities.organizationId, input.organizationId),
+            eq(schema.documentIdentities.id, input.id)
           )
         )
         .limit(1);
