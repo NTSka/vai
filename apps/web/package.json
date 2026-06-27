@@ -1,0 +1,14 @@
+{
+  "name": "@vai/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo \"web app is planned for Phase 9\"",
+    "build": "echo \"web app is planned for Phase 9\"",
+    "typecheck": "echo \"web app is planned for Phase 9\"",
+    "test": "echo \"web tests are not implemented yet\"",
+    "lint": "echo \"web lint is not configured yet\"",
+    "format": "echo \"web format is not configured yet\""
+  }
+}

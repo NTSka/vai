@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+drizzle.config.js
+drizzle.config.js.map
+drizzle.config.d.ts
+drizzle.config.d.ts.map
+__pycache__/
+.pytest_cache/
+.venv/

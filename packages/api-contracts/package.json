@@ -1,0 +1,21 @@
+{
+  "name": "@vai/api-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"api-contracts tests are not implemented yet\"",
+    "lint": "echo \"api-contracts lint is not configured yet\"",
+    "format": "echo \"api-contracts format is not configured yet\""
+  }
+}

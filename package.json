@@ -1,0 +1,21 @@
+{
+  "name": "vai2",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.18.2",
+  "scripts": {
+    "dev": "pnpm -r --if-present dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint",
+    "format": "pnpm -r --if-present format",
+    "db:generate": "pnpm --filter @vai/backend db:generate",
+    "db:migrate": "pnpm --filter @vai/backend db:migrate",
+    "infra:health": "pnpm --filter @vai/backend health:check"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.2"
+  }
+}

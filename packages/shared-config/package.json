@@ -1,0 +1,21 @@
+{
+  "name": "@vai/shared-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"shared-config tests are not implemented yet\"",
+    "lint": "echo \"shared-config lint is not configured yet\"",
+    "format": "echo \"shared-config format is not configured yet\""
+  }
+}
