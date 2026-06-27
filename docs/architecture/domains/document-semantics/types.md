@@ -33,6 +33,7 @@ Subdomains:
 
 - estimate data;
 - drawing document data;
+- statement/register data;
 - specification data;
 - title sheet data;
 - future document-type data.
@@ -42,6 +43,13 @@ Subdomains:
 Identifies documents semantically through own codes, reference codes, normalized
 designations, parsed code parts, document purpose, and cross-document identity
 links.
+
+The initial GOST/SPDS document-structure assumptions for documentation
+stage/package context, drawing documents, estimate documents, and related
+source forms are captured in
+[`gost-document-structure.md`](./gost-document-structure.md). Typed data,
+identity parsing, and project placement should use that document as the Phase 12
+reference contract until a more specific ADR supersedes it.
 
 ### Future Semantic Understanding
 

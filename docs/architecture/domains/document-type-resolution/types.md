@@ -7,7 +7,14 @@ Document type resolution is separate from file technical processing. File
 technical processing determines whether a file is PDF, XLSX, or another
 technical format. Document type resolution determines whether the document is an
 estimate, drawing document, specification, title sheet, or another construction
-document type.
+document type. Register-like ведомости are resolved as `statement`; a statement
+table embedded in a drawing can also be emitted as typed statement data while
+the source document family remains `drawing_document`.
+
+Documentation stage and package context are resolved alongside document family
+but are not document families. For example, `P`/project documentation and
+`R`/working documentation describe stage/package context; `estimate` and
+`drawing_document` describe document family.
 
 ## Principles
 
@@ -21,6 +28,8 @@ document type.
 - `TypedDocumentFamily` is owned by the typed document data subdomain in
   document semantics. This domain uses that taxonomy for routing, but does not
   define it.
+- Documentation stage/package context must be represented separately from
+  `TypedDocumentFamily`.
 
 ## Identifiers
 
@@ -60,6 +69,9 @@ interface DocumentTypeResolution {
   family: TypedDocumentFamily | "unknown" | "unsupported";
   type?: string;
 
+  documentationStage?: DocumentationStageResolution;
+  packageContext?: DocumentationPackageContextResolution;
+
   status: DocumentTypeResolutionStatus;
 
   confidence?: number;
@@ -93,6 +105,38 @@ interface DocumentTypeAlternative {
 extractors. `type` is an optional more specific classifier value that can evolve
 with concrete document standards and organization-specific rules.
 
+```ts
+interface DocumentationStageResolution {
+  stage?: DocumentationStage;
+  raw?: string;
+  status: "resolved" | "uncertain" | "missing" | "unsupported";
+  confidence?: number;
+}
+```
+
+```ts
+type DocumentationStage =
+  | "P"
+  | "R"
+  | "I";
+```
+
+```ts
+interface DocumentationPackageContextResolution {
+  projectDesignation?: string;
+  sectionNumber?: string;
+  sectionTitle?: string;
+  subsectionTitle?: string;
+  volumeNumber?: string;
+  packageTitle?: string;
+  confidence?: number;
+}
+```
+
+Stage normalization uses latin uppercase codes. Raw `П`/`P` becomes `P`, raw
+`Р`/`R` or clear working-documentation context becomes `R`, and raw `И`/`I`
+becomes `I`.
+
 ## Out of Scope
 
 - File format detection.
@@ -101,6 +145,7 @@ with concrete document standards and organization-specific rules.
 - Extracting typed document facts such as estimate line items.
 - Project structure placement.
 - Business capability execution.
+- Treating project documentation or working documentation as document families.
 
 ## Open Questions
 

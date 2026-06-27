@@ -215,14 +215,15 @@ tasks while preserving the original task as an epic/container.
 
 | ID | Task | Depends on | Result | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| MVP-1201 | Implement initial document type resolver. | MVP-1106, MVP-1110 | Resolver for estimate, drawing document, unknown, unsupported. | Uncertain/unknown/unsupported outcomes are persisted as domain results, not job failures. |
+| MVP-1201 | Implement initial document type and stage resolver. | MVP-1106, MVP-1110 | Resolver for document family (`estimate`, `drawing_document`, `statement`, `unknown`, `unsupported`) and documentation stage/package context (`P`, `R`, `I`, section, volume where available). | Uncertain/unknown/unsupported outcomes are persisted as domain results, not job failures. Stage/package context is not treated as a document family. |
 | MVP-1202 | Implement typed estimate extractor baseline. | MVP-1201, MVP-1106, MVP-1110 | Estimate typed records. | Extractor can persist basis/reference fields and minimal estimate facts from fixture input. |
 | MVP-1203 | Implement typed drawing extractor baseline. | MVP-1201, MVP-1107, MVP-1109 | Drawing typed records. | Extractor can persist stamp/source designation fields from fixture input. |
-| MVP-1204 | Implement GOST/document-code parser. | MVP-1202, MVP-1203 | Parser for supported standard. | Fixture tests cover valid, invalid, missing, unsupported-standard, own-code, and reference-code examples. |
-| MVP-1205 | Implement document identity resolver. | MVP-1204 | `DocumentIdentity` records. | Resolver creates own/reference identities from typed data source fields and preserves source typed record ids. |
-| MVP-1206 | Implement GOST node path rules. | MVP-1204, MVP-0309 | Standard-specific project node creation. | Parsed own-code identities create stable nodes for supported code levels. Optional missing parts are handled by standard rules. |
-| MVP-1207 | Implement target-node selection rules. | MVP-1206 | Placement target per document family. | Drawing and estimate fixtures attach to expected node levels for the supported GOST/document-code standard. |
-| MVP-1208 | Implement placement status outcomes. | MVP-1207 | Placed, ambiguous, and unplaced placement records. | Missing/invalid/unsupported own-code creates unplaced placement. Multiple valid targets create ambiguous placement. |
+| MVP-1204 | Implement typed statement/register extractor baseline. | MVP-1201, MVP-1203, MVP-1107, MVP-1109 | Statement/register typed records. | Extractor can persist standalone statement documents and statement/register tables embedded in drawing documents. Rows preserve source references and produce reference candidates without changing the source document family. |
+| MVP-1205 | Implement GOST/document-code parser. | MVP-1202, MVP-1203, MVP-1204 | Parser for supported standard. | Fixture tests cover valid, invalid, missing, unsupported-standard, own-code, and reference-code examples from estimates, drawings, and statements/registers. |
+| MVP-1206 | Implement document identity resolver. | MVP-1205 | `DocumentIdentity` records. | Resolver creates own/reference identities from typed data source fields and preserves source typed record ids. |
+| MVP-1207 | Implement GOST node path rules. | MVP-1205, MVP-0309 | Standard-specific project node creation. | Parsed own-code identities create stable nodes for supported code levels. Optional missing parts are handled by standard rules. |
+| MVP-1208 | Implement target-node selection rules. | MVP-1207 | Placement target per document family. | Drawing, estimate, and standalone statement fixtures attach to expected node levels when they have explicit own-code placement inputs. Embedded statement rows do not place the source drawing by themselves. |
+| MVP-1209 | Implement placement status outcomes. | MVP-1208 | Placed, ambiguous, and unplaced placement records. | Missing/invalid/unsupported own-code creates unplaced placement. Multiple valid targets create ambiguous placement. |
 
 ### Phase 13 Tasks: Baseline Hardening
 
@@ -240,8 +241,8 @@ tasks while preserving the original task as an epic/container.
 
 | ID | Task | Depends on | Result | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| MVP-1401 | Define capability run model. | MVP-1208 | Capability run domain shape. | Model separates capability execution from baseline processing and stores run status, input selection, timestamps, and warnings/errors. |
-| MVP-1402 | Define RD-estimate comparison input contract. | MVP-1202, MVP-1205 | Input selector for normalized estimate/drawing data. | Contract does not require reading raw files when normalized data exists. |
+| MVP-1401 | Define capability run model. | MVP-1209 | Capability run domain shape. | Model separates capability execution from baseline processing and stores run status, input selection, timestamps, and warnings/errors. |
+| MVP-1402 | Define RD-estimate comparison input contract. | MVP-1202, MVP-1206 | Input selector for normalized estimate/drawing data. | Contract does not require reading raw files when normalized data exists. |
 | MVP-1403 | Define comparison result model. | MVP-1402 | Result records and statuses. | Model can represent match, mismatch, missing source data, uncertain comparison, and review status. |
 | MVP-1404 | Implement capability job and orchestrator. | MVP-0609, MVP-1401 | Capability execution through job queue. | Capability processor runs as a job and does not directly mutate unrelated domains. |
 | MVP-1405 | Implement first comparison skeleton. | MVP-1402, MVP-1403, MVP-1404 | Deterministic comparison output from normalized records. | Given fixture normalized data, comparison creates expected result rows without raw-file parsing. |
@@ -719,17 +720,37 @@ Definition of done:
 
 Goal: make the baseline processing semantically useful.
 
+Normative/domain reference:
+
+- `docs/architecture/domains/document-semantics/gost-document-structure.md`
+  defines the initial documentation stage/package, drawing, estimate, and
+  statement/register structure assumptions for this phase.
+
 Tasks:
 
-- Implement document type resolver for initial families:
+- Implement document type and stage resolver for initial families:
   - estimate;
   - drawing document;
+  - statement;
   - unknown;
   - unsupported.
+- Resolve documentation stage/package context separately from document family:
+  - `P`;
+  - `R`;
+  - `I`;
+  - section/volume metadata where available.
 - Implement typed estimate extractor baseline.
 - Implement typed drawing document extractor baseline.
+- Implement typed statement/register extractor baseline:
+  - standalone statement/register documents are typed as `statement`;
+  - statement/register tables embedded in drawing documents are emitted as typed
+    statement data without changing the source document family;
+  - rows preserve source references and become reference candidates or
+    relationship hints unless the statement itself has an explicit own
+    designation.
 - Extract estimate basis/reference fields.
 - Extract drawing stamp/source designation fields.
+- Extract statement/register row designation and work-quantity fields.
 - Implement GOST/document-code parser.
 - Parse own and reference identities.
 - Persist invalid, missing, and unsupported identity outcomes.

@@ -6,6 +6,14 @@ Typed document data interprets content artifacts into domain-specific document
 facts. It is separate from the Content domain, which owns raw or
 semi-structured artifacts such as text, regions, cells, OCR results, and tables.
 
+Typed records should mirror the source document form. For example, a drawing in
+the working-documentation stage should expose a main-inscription block and
+sheet metadata; a local estimate should expose header fields, sections, line
+items, resource/detail rows, totals, and signatures. The common layer may store
+records generically, but concrete schemas should preserve the form structure
+described in
+[`../gost-document-structure.md`](../gost-document-structure.md).
+
 ## Principles
 
 - Typed document data works on `DocumentVersion` and `ContentArtifact` inputs.
@@ -22,6 +30,9 @@ semi-structured artifacts such as text, regions, cells, OCR results, and tables.
 - The typed document data subdomain owns the routing-level
   `TypedDocumentFamily` taxonomy. Other domains may reference it for routing,
   but should not redefine it.
+- `PD`, `RD`, and `ID` are documentation stages or package contexts, not
+  document families. They must be represented separately from
+  `TypedDocumentFamily`.
 
 ## Domain Boundary
 
@@ -74,6 +85,7 @@ interface TypedDataExtractionJob extends ProcessingJob {
 type TypedDocumentFamily =
   | "estimate"
   | "drawing_document"
+  | "statement"
   | "specification"
   | "title_sheet";
 ```
@@ -82,6 +94,27 @@ type TypedDocumentFamily =
 data extraction. More specific document classifiers may exist in document type
 resolution, extractor manifests, or concrete typed-data schemas, but they should
 not redefine this enum.
+
+`TypedDocumentFamily` must not contain `PD` or `RD`. A document can be an
+estimate in the project-documentation stage, an estimate in the
+working-documentation stage, a drawing in the working-documentation stage, or a
+statement/register table in the working-documentation stage.
+
+```ts
+type DocumentationStage =
+  | "P"
+  | "R"
+  | "I";
+```
+
+Stage normalization uses latin uppercase codes:
+
+- raw `П` or `P` -> normalized `P`;
+- raw `Р`, `R`, or textual working-documentation labels -> normalized `R`;
+- raw `И` or `I` -> normalized `I`.
+
+If a source says `PD` or `RD`, store that as `raw` and normalize to `P` or `R`
+only when the source context is clear.
 
 ## TypedDataExtractorManifest
 
@@ -174,7 +207,82 @@ interface TypedDataRecord {
 }
 ```
 
+Concrete records should contain typed payloads with source references:
+
+```ts
+interface TypedDataPayloadEnvelope<TPayload> {
+  schema: TypedDataSchemaRef;
+  standard?: AppliedDocumentStandard;
+  documentationStage?: TypedField<DocumentationStage>;
+  packageContext?: DocumentationPackageContext;
+  payload: TPayload;
+  warnings: TypedDataWarning[];
+}
+```
+
+```ts
+interface AppliedDocumentStandard {
+  id: string;
+  version?: string;
+  form?: string;
+}
+
+interface TypedField<T> {
+  raw?: string;
+  value?: T;
+  normalized?: string;
+  confidence?: number;
+  source: SourceReference[];
+  warnings?: TypedDataWarning[];
+}
+
+interface SourceReference {
+  artifactId: ContentArtifactID;
+  pageNumber?: number;
+  regionId?: string;
+  tableId?: string;
+  rowIndex?: number;
+  columnIndex?: number;
+  cellRef?: string;
+  gostFieldNumber?: string;
+}
+
+interface TypedDataWarning {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+}
+
+interface DocumentationPackageContext {
+  stage?: TypedField<DocumentationStage>;
+  projectDesignation?: TypedField<string>;
+  sectionNumber?: TypedField<string>;
+  sectionTitle?: TypedField<string>;
+  subsectionTitle?: TypedField<string>;
+  volumeNumber?: TypedField<string>;
+  packageTitle?: TypedField<string>;
+}
+```
+
+`payload` should be a form-shaped object, not an arbitrary flat map. Examples:
+
+```text
+drawing_document.gost_main_inscription
+documentation_package.header
+statement.gost_document_register
+statement.work_quantity_statement
+estimate.local_estimate
+estimate.object_estimate
+estimate.summary_estimate
+```
+
 ## Initial Subdomains
+
+The first typed extractors should follow the stage/package and estimate
+source-field expectations in
+[`../gost-document-structure.md`](../gost-document-structure.md). Those
+expectations define which source fields are needed for GOST identity parsing and
+project placement; concrete extractors still own their output schemas.
 
 ### Estimate Data
 
@@ -183,9 +291,12 @@ Interprets XLSX/PDF estimate content into estimate-specific facts.
 Initial responsibilities:
 
 - detect basis/reference fields;
+- classify estimate form kind, such as local estimate, object estimate, or
+  summary estimate calculation when the source provides it;
 - extract local estimate sections;
 - extract estimate line items;
 - extract quantities and units;
+- preserve worksheet/row/cell or page/table/region source references;
 - preserve source content artifact links.
 
 ### Drawing Document Data
@@ -195,9 +306,53 @@ Interprets drawing-document content artifacts.
 MVP responsibilities:
 
 - interpret title block/stamp fields;
+- extract document designation, stage, mark, sheet, title, and revision/change
+  fields where available;
 - extract sheet metadata;
 - interpret document/table fields present on drawing sheets;
 - preserve source content artifact links.
+
+### Statement Data
+
+Interprets ведомости/register-style documents and statement tables.
+
+Statement data covers documents whose primary content is a structured list of
+sheets, documents, document sets, specifications, referenced/attached documents,
+or work quantities. A statement may be a standalone uploaded document or a
+table block embedded inside another document, such as a general-data drawing
+sheet.
+
+MVP responsibilities:
+
+- classify statement form kind, such as drawing sheet register, document
+  register, reference/attached document register, main drawing set register,
+  specification register, work quantity statement, or unknown statement;
+- extract statement sections where the form has them, for example referenced
+  documents and attached documents;
+- extract row fields with source table/row/cell references;
+- preserve referenced document designations as candidates for reference
+  identities and document relationships;
+- avoid treating a referenced row as the source document's own identity unless
+  the statement itself has an explicit own designation.
+
+### Documentation Package Context Data
+
+Interprets title-page, section, and volume/package content into documentation
+package context facts.
+
+This is not a separate `TypedDocumentFamily`. It can accompany a `title_sheet`,
+`drawing_document`, `estimate`, or `specification` record when the source
+document carries project-documentation or working-documentation package
+metadata.
+
+MVP responsibilities:
+
+- extract section number and section title;
+- extract volume/book designation where available;
+- extract project designation candidates;
+- extract and normalize documentation stage where available;
+- preserve source content artifact links;
+- avoid forcing package identities into drawing mark semantics.
 
 Out of MVP scope:
 

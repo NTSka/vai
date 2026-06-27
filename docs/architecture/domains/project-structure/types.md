@@ -70,6 +70,14 @@ type OrganizationID = string;
 type ProcessingJobID = string;
 ```
 
+```ts
+interface ProjectStructurePlacementWarning {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+}
+```
+
 ## ProjectStructureNode
 
 `ProjectStructureNode` represents one node in the generated project navigation
@@ -103,6 +111,9 @@ type ProjectStructureNodeKind =
   | "complex_part_kind"
   | "complex_part_number"
   | "building"
+  | "documentation_section"
+  | "documentation_subsection"
+  | "documentation_volume"
   | "stage"
   | "mark"
   | "document_group";
@@ -113,6 +124,8 @@ type ProjectStructureNodeSubject =
   | "project"
   | "object"
   | "subobject"
+  | "documentation_section"
+  | "documentation_volume"
   | "discipline_or_mark"
   | "document_package"
   | "document_group";
@@ -140,10 +153,12 @@ interface ProjectStructurePlacement {
   documentId: DocumentID;
   documentVersionId: DocumentVersionID;
 
-  placedByIdentityId: DocumentIdentityID;
-  nodeId: ProjectStructureNodeID;
+  placedByIdentityId?: DocumentIdentityID;
+  nodeId?: ProjectStructureNodeID;
+  candidateNodeIds?: ProjectStructureNodeID[];
 
   status: ProjectStructurePlacementStatus;
+  warnings: ProjectStructurePlacementWarning[];
 
   producedByJobId?: ProcessingJobID;
 
@@ -163,6 +178,19 @@ type ProjectStructurePlacementStatus =
 node. `ambiguous` means multiple possible placements were found. `unplaced`
 means the system could not place the document version, usually because its own
 code is missing, invalid, or unsupported.
+
+Placement invariants:
+
+- `placed` requires `placedByIdentityId` and `nodeId`; `candidateNodeIds` should
+  be absent or contain only diagnostic alternatives.
+- `ambiguous` requires `candidateNodeIds` with at least two candidates and
+  should not set `nodeId` unless a separate rule chooses a provisional display
+  node.
+- `unplaced` may omit both `placedByIdentityId` and `nodeId`; it must include a
+  warning explaining why placement was not possible.
+- `warnings` should be present for `ambiguous` and `unplaced` outcomes and may
+  also be present for `placed` when the placement succeeded with non-fatal
+  assumptions.
 
 ## Document Grouping
 
@@ -185,6 +213,11 @@ intake facts and should not define the project hierarchy.
 
 Initial placement uses only parsed `own_code` identities.
 
+The first implementation uses the documentation stage/package, drawing, and
+estimate assumptions in
+[`../document-semantics/gost-document-structure.md`](../document-semantics/gost-document-structure.md)
+as the standard-specific placement reference.
+
 The initial node path is derived from `DocumentCodeParts`:
 
 ```text
@@ -193,6 +226,9 @@ projectCode
   -> complexPartKind
   -> complexPartNumber
   -> buildingNumber
+  -> documentation_section
+  -> documentation_subsection
+  -> documentation_volume
   -> stage
   -> mark
   -> document_group
@@ -208,6 +244,19 @@ The placement target is not always the deepest parsed node. It should be chosen
 by the placement rules for the applicable GOST/document-code standard and
 document type. For example, a drawing may attach to a mark or document group,
 while an estimate may attach to a project, object, subobject, or stage node.
+
+Initial target-node assumptions:
+
+- Drawing documents in the working-documentation stage with parsed own codes
+  attach to the mark or
+  document-group level defined by the supported parser.
+- Project-documentation packages attach to project,
+  `documentation_section`, `documentation_subsection`, or
+  `documentation_volume` nodes when their own identity and package context are
+  parsed.
+- Estimates attach only through explicit own-code placement rules. Estimate
+  reference codes are relationship inputs and must not place the estimate
+  source document by themselves.
 
 ## Relationship Inputs
 
