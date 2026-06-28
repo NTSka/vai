@@ -6,6 +6,8 @@ import { z } from "zod";
 import type {
   CorrelationId,
   DocumentVersionId,
+  PdfRenderedPage,
+  PdfTextLayerResult,
   StoredFileId,
   TechnicalStoredFileRef
 } from "@vai/domain-contracts";
@@ -496,6 +498,7 @@ async function executeContentPlaceholder(
     readonly documentRegistry: DocumentRegistryRepository;
     readonly eventing: EventingRepository;
     readonly objectStorage?: ObjectStorageClient;
+    readonly cvOcrClient?: CvOcrClient;
   },
   job: ProcessingJob
 ): Promise<void> {
@@ -556,6 +559,29 @@ async function executeContentPlaceholder(
       artifactType: "xlsx_cells",
       payload: buildXlsxContentArtifactPayload(cellStorage),
       producedByJobId: job.id
+    });
+    await completeJobAndPublishEvents(input.processing, job, [
+      buildVersionEvent(job, "content.extracted", payload)
+    ]);
+    return;
+  }
+
+  if (detection?.format === "pdf") {
+    if (!input.objectStorage) {
+      await failJob(input.processing, job, "object_storage_required", payload);
+      return;
+    }
+    if (!input.cvOcrClient) {
+      await failJob(input.processing, job, "cv_ocr_client_required", payload);
+      return;
+    }
+
+    await persistPdfContentOutputs({
+      baselineFacts: input.baselineFacts,
+      objectStorage: input.objectStorage,
+      cvOcrClient: input.cvOcrClient,
+      job,
+      payload
     });
     await completeJobAndPublishEvents(input.processing, job, [
       buildVersionEvent(job, "content.extracted", payload)
@@ -1107,6 +1133,122 @@ function placementStatusForIdentity(
   return readString(identity.parsedParts["placementAmbiguityCode"]) ? "ambiguous" : "placed";
 }
 
+async function persistPdfContentOutputs(input: {
+  readonly baselineFacts: BaselineFactsRepository;
+  readonly objectStorage: ObjectStorageClient;
+  readonly cvOcrClient: CvOcrClient;
+  readonly job: ProcessingJob;
+  readonly payload: z.infer<typeof documentVersionPayloadSchema>;
+}): Promise<void> {
+  const [renderedArtifact, textLayerArtifact] = await Promise.all([
+    input.baselineFacts.findContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_rendered_pages"
+    }),
+    input.baselineFacts.findContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_text_layer"
+    })
+  ]);
+
+  if (!renderedArtifact) {
+    throw new ProcessorExecutionError({
+      code: "pdf_rendered_pages_missing",
+      message: "PDF rendered pages artifact is required for content extraction",
+      retryable: false,
+      details: { documentVersionId: input.payload.documentVersionId }
+    });
+  }
+
+  const renderedPages = await loadRenderedPdfPagesFromArtifact({
+    objectStorage: input.objectStorage,
+    artifactPayload: renderedArtifact.payload
+  });
+  const textPages = readPdfTextPagesFromArtifact(textLayerArtifact?.payload);
+
+  try {
+    const layout = await input.cvOcrClient.detectPdfLayout({
+      renderedPages,
+      textPages
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_layout",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_layout", version: "1.0.0" },
+        adapter: layout.adapter,
+        regions: layout.regions,
+        diagnostics: layout.diagnostics
+      },
+      producedByJobId: input.job.id
+    });
+
+    const ocrCandidates = await input.cvOcrClient.planPdfOcrCandidates({
+      regions: layout.regions,
+      renderedPages
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_ocr_candidates",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_ocr_candidates", version: "1.0.0" },
+        adapter: ocrCandidates.adapter,
+        candidates: ocrCandidates.candidates,
+        diagnostics: ocrCandidates.diagnostics
+      },
+      producedByJobId: input.job.id
+    });
+
+    const ocrText = await input.cvOcrClient.runPdfTargetedOcr({
+      renderedPages,
+      candidates: ocrCandidates.candidates,
+      textPages
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_ocr_text",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_ocr_text", version: "1.0.0" },
+        adapter: ocrText.adapter,
+        texts: ocrText.texts,
+        diagnostics: ocrText.diagnostics
+      },
+      producedByJobId: input.job.id
+    });
+
+    const tables = await input.cvOcrClient.reconstructPdfTables({
+      regions: layout.regions,
+      candidates: ocrCandidates.candidates,
+      ocrTexts: ocrText.texts,
+      renderedPages
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_tables",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_tables", version: "1.0.0" },
+        adapter: tables.adapter,
+        tables: tables.tables,
+        rows: flattenPdfTableRows(tables.tables),
+        diagnostics: tables.diagnostics
+      },
+      producedByJobId: input.job.id
+    });
+  } catch (error) {
+    throw classifyPdfTechnicalError(error);
+  }
+}
+
 async function persistFailedXlsxTechnicalOutcome(
   input: {
     readonly processing: ProcessingRepository;
@@ -1387,6 +1529,64 @@ async function storePdfRenderedPages(input: {
   return refs;
 }
 
+async function loadRenderedPdfPagesFromArtifact(input: {
+  readonly objectStorage: ObjectStorageClient;
+  readonly artifactPayload: Record<string, unknown>;
+}): Promise<PdfRenderedPage[]> {
+  const pages = readRecordArray(input.artifactPayload["pages"]);
+  const renderedPages: PdfRenderedPage[] = [];
+
+  for (const page of pages) {
+    const payloadRef = readRecord(page["payloadRef"]);
+    const bucket = readRequiredString(payloadRef?.["bucket"], "pdf rendered page bucket");
+    const key = readRequiredString(payloadRef?.["key"], "pdf rendered page key");
+    const content = await readObjectBytes({
+      objectStorage: input.objectStorage,
+      bucket,
+      key,
+      code: "pdf_render_read_failed"
+    });
+    renderedPages.push({
+      pageNumber: readRequiredNumber(page["pageNumber"], "pdf rendered page number"),
+      widthPx: readRequiredNumber(page["widthPx"], "pdf rendered page width"),
+      heightPx: readRequiredNumber(page["heightPx"], "pdf rendered page height"),
+      dpi: readRequiredNumber(page["dpi"], "pdf rendered page dpi"),
+      imageFormat: "png",
+      sha256: readRequiredString(page["sha256"], "pdf rendered page sha256"),
+      sizeBytes: readRequiredNumber(page["sizeBytes"], "pdf rendered page size"),
+      content
+    });
+  }
+
+  return renderedPages;
+}
+
+function readPdfTextPagesFromArtifact(
+  artifactPayload: Record<string, unknown> | undefined
+): PdfTextLayerResult["pages"] {
+  if (!artifactPayload) {
+    return [];
+  }
+  const pages = artifactPayload["pages"];
+  return Array.isArray(pages) ? (pages as PdfTextLayerResult["pages"]) : [];
+}
+
+function flattenPdfTableRows(
+  tables: Awaited<ReturnType<CvOcrClient["reconstructPdfTables"]>>["tables"]
+): Record<string, unknown>[] {
+  return tables.flatMap((table) =>
+    table.rows.map((row, rowIndex) => ({
+      tableLocalId: table.localId,
+      sourceRegionId: table.sourceRegionId,
+      rowIndex,
+      cells: row.map((cell) => ({
+        ...cell,
+        value: cell.text
+      }))
+    }))
+  );
+}
+
 async function readObjectBytes(input: {
   readonly objectStorage: ObjectStorageClient;
   readonly bucket: string;
@@ -1419,6 +1619,43 @@ async function readStream(stream: Readable): Promise<Uint8Array> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item)
+      )
+    : [];
+}
+
+function readRequiredString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new ProcessorExecutionError({
+      code: "pdf_rendered_page_payload_invalid",
+      message: `${label} is missing from rendered page payload`,
+      retryable: false
+    });
+  }
+  return value;
+}
+
+function readRequiredNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new ProcessorExecutionError({
+      code: "pdf_rendered_page_payload_invalid",
+      message: `${label} is missing from rendered page payload`,
+      retryable: false
+    });
+  }
+  return value;
 }
 
 function classifyPdfTechnicalError(error: unknown): ProcessorExecutionError {

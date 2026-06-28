@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from processor.adapters.cv_layout import OpenCVLayoutDetector
 from processor.adapters.tesseract_cli import TesseractCLIConfig, TesseractCLIEngine
@@ -41,6 +42,14 @@ from vai_cv_ocr_service.domain import (
 
 CONTENT_ADAPTER_ID = "legacy-processor-adapted"
 CONTENT_ADAPTER_VERSION = "phase11-adapter-v1"
+TESSERACT_PSM_BY_CANDIDATE_KIND = {
+    "stamp": 6,
+    "side_strip_candidate": 6,
+    "stamp_cell_candidate": 6,
+    "table_candidate": 6,
+    "table_cell_candidate": 6,
+    "text_page": 4,
+}
 
 
 class PdfContentOperationError(ValueError):
@@ -81,14 +90,17 @@ def run_targeted_ocr(
     tesseract_binary: str = "tesseract",
 ) -> tuple[tuple[OcrText, ...], tuple[Diagnostic, ...]]:
     legacy_pages = tuple(to_legacy_rendered_page(page) for page in rendered_pages)
-    legacy_candidates = tuple(to_legacy_candidate(candidate) for candidate in candidates)
+    rendered_pages_by_number = {page.page_number: page for page in rendered_pages}
+    legacy_candidates = tuple(
+        to_legacy_candidate(candidate, rendered_pages_by_number) for candidate in candidates
+    )
     plans = plans_from_candidates(legacy_candidates)
     engine = TesseractCLIEngine(
-        config=TesseractCLIConfig(binary=tesseract_binary),
+        config=tesseract_config(tesseract_binary),
     )
     artifacts, diagnostics = OCRExecutor(
         engine=engine,
-        config=OCRExecutorConfig(max_workers=1),
+        config=OCRExecutorConfig(max_workers=ocr_max_workers()),
     ).execute(
         pages=legacy_pages,
         plans=plans,
@@ -96,7 +108,9 @@ def run_targeted_ocr(
         source_hash="inline-source",
         processor_version=CONTENT_ADAPTER_VERSION,
         config_hash="default",
-        text_layer_pages=tuple(to_legacy_text_page(page) for page in text_pages),
+        text_layer_pages=tuple(
+            to_legacy_text_page(page, rendered_pages_by_number) for page in text_pages
+        ),
     )
     return (
         tuple(
@@ -196,13 +210,17 @@ def candidate_metadata(candidate: LegacyOcrCandidate) -> dict[str, object]:
     }
 
 
-def to_legacy_candidate(candidate: OcrCandidate) -> LegacyOcrCandidate:
+def to_legacy_candidate(
+    candidate: OcrCandidate,
+    rendered_pages_by_number: dict[int, RenderedPdfPage] | None = None,
+) -> LegacyOcrCandidate:
     metadata = parse_json_object(candidate.metadata_json)
     legacy = metadata.pop("_legacy", {})
     if not isinstance(legacy, dict):
         legacy = {}
     crop = legacy.get("cropBbox")
     bbox = legacy.get("bbox")
+    rendered_page = (rendered_pages_by_number or {}).get(candidate.location.page_number)
     return LegacyOcrCandidate(
         local_id=candidate.local_id,
         page_local_id=str(legacy.get("pageLocalId", f"page-{candidate.location.page_number}")),
@@ -210,8 +228,8 @@ def to_legacy_candidate(candidate: OcrCandidate) -> LegacyOcrCandidate:
         kind=str(legacy.get("kind", reverse_candidate_kind(candidate.target_kind))),
         source_type=str(legacy.get("sourceType", "region")),
         source_structural_kind=str(legacy.get("sourceStructuralKind", candidate.target_kind)),
-        bbox=legacy_bbox_from_payload(bbox, candidate.location.bbox),
-        crop_bbox=legacy_bbox_from_payload(crop, candidate.location.bbox),
+        bbox=legacy_bbox_from_payload(bbox, candidate.location.bbox, rendered_page),
+        crop_bbox=legacy_bbox_from_payload(crop, candidate.location.bbox, rendered_page),
         sort_order=int(legacy.get("sortOrder", 0)),
         confidence=float(legacy.get("confidence", 0.5)),
         target_dpi=int(legacy.get("targetDpi", 300)),
@@ -282,13 +300,17 @@ def to_legacy_rendered_page(page: RenderedPdfPage) -> RenderedPage:
     )
 
 
-def to_legacy_text_page(page: PdfTextPage) -> TextLayerPage:
+def to_legacy_text_page(
+    page: PdfTextPage,
+    rendered_pages_by_number: dict[int, RenderedPdfPage] | None = None,
+) -> TextLayerPage:
+    rendered_page = (rendered_pages_by_number or {}).get(page.page_number)
     return TextLayerPage(
         page_index=page.page_number - 1,
         words=tuple(
             TextLayerWord(
                 text=word.text,
-                bbox=to_legacy_bbox(word.bbox),
+                bbox=to_legacy_bbox(word.bbox, rendered_page),
                 block_index=word.block_index,
                 line_index=word.line_index,
                 word_index=word.word_index,
@@ -420,7 +442,21 @@ def reverse_candidate_kind(kind: str) -> str:
     return "text_page"
 
 
-def to_legacy_bbox(bbox: BoundingBox) -> LegacyBoundingBox:
+def to_legacy_bbox(
+    bbox: BoundingBox,
+    rendered_page: RenderedPdfPage | None = None,
+) -> LegacyBoundingBox:
+    if bbox.coordinate_system == "page_points" and rendered_page is not None:
+        scale = rendered_page.dpi / 72.0
+        return LegacyBoundingBox(
+            page_index=bbox.page_number - 1,
+            x=bbox.x * scale,
+            y=bbox.y * scale,
+            width=bbox.width * scale,
+            height=bbox.height * scale,
+            rotation_degrees=0,
+            coordinate_space="pixel",
+        )
     return LegacyBoundingBox(
         page_index=bbox.page_number - 1,
         x=bbox.x,
@@ -458,7 +494,11 @@ def legacy_bbox_payload(bbox: LegacyBoundingBox) -> dict[str, object]:
     }
 
 
-def legacy_bbox_from_payload(payload: object, fallback: BoundingBox | None) -> LegacyBoundingBox:
+def legacy_bbox_from_payload(
+    payload: object,
+    fallback: BoundingBox | None,
+    rendered_page: RenderedPdfPage | None = None,
+) -> LegacyBoundingBox:
     if isinstance(payload, dict):
         return LegacyBoundingBox(
             page_index=int(payload.get("pageIndex", 0)),
@@ -470,7 +510,7 @@ def legacy_bbox_from_payload(payload: object, fallback: BoundingBox | None) -> L
             coordinate_space=str(payload.get("coordinateSpace", "pixel")),
         )
     if fallback is not None:
-        return to_legacy_bbox(fallback)
+        return to_legacy_bbox(fallback, rendered_page)
     return LegacyBoundingBox(0, 0, 0, 1, 1, 0, "pixel")
 
 
@@ -490,6 +530,27 @@ def parse_json_object(value: str) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def ocr_max_workers() -> int:
+    raw = os.getenv("CV_OCR_OCR_MAX_WORKERS", "8")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 8
+    return max(1, value)
+
+
+def tesseract_config(binary: str = "tesseract") -> TesseractCLIConfig:
+    return TesseractCLIConfig(
+        binary=binary,
+        languages=os.getenv("CV_OCR_TESSERACT_LANGUAGES", "rus+eng"),
+        timeout_seconds=float(os.getenv("CV_OCR_TESSERACT_TIMEOUT_SECONDS", "30")),
+        default_psm=6,
+        psm_by_candidate_kind=dict(TESSERACT_PSM_BY_CANDIDATE_KIND),
+        char_whitelist_by_candidate_kind={},
+        char_whitelist_by_candidate_id_contains={},
+    )
 
 
 def service_request() -> StructuralExtractionRequest:

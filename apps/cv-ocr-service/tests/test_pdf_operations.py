@@ -26,6 +26,7 @@ from vai_cv_ocr_service.pdf_content_operations import (
     plan_ocr_candidates,
     reconstruct_pdf_tables,
     run_targeted_ocr,
+    tesseract_config,
 )
 
 
@@ -102,6 +103,23 @@ def test_plans_targeted_ocr_and_uses_text_layer_before_tesseract() -> None:
         diagnostic.code == "ocr_tesseract_not_configured"
         for diagnostic in ocr_diagnostics
     )
+
+
+def test_service_tesseract_profile_matches_legacy_benchmark_baseline() -> None:
+    config = tesseract_config("tesseract-test")
+
+    assert config.binary == "tesseract-test"
+    assert config.languages == "rus+eng"
+    assert config.psm_by_candidate_kind == {
+        "stamp": 6,
+        "side_strip_candidate": 6,
+        "stamp_cell_candidate": 6,
+        "table_candidate": 6,
+        "table_cell_candidate": 6,
+        "text_page": 4,
+    }
+    assert config.char_whitelist_by_candidate_kind == {}
+    assert config.char_whitelist_by_candidate_id_contains == {}
 
 
 def test_table_reconstruction_baseline_preserves_cell_location() -> None:

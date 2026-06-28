@@ -1064,6 +1064,12 @@ describe("Phase 7 baseline processing skeleton", () => {
     const renderedPages = artifacts.find(
       (artifact) => artifact.artifactType === "pdf_rendered_pages"
     );
+    const layout = artifacts.find((artifact) => artifact.artifactType === "pdf_layout");
+    const ocrCandidates = artifacts.find(
+      (artifact) => artifact.artifactType === "pdf_ocr_candidates"
+    );
+    const ocrText = artifacts.find((artifact) => artifact.artifactType === "pdf_ocr_text");
+    const tables = artifacts.find((artifact) => artifact.artifactType === "pdf_tables");
 
     expect(version?.status).toBe("ready");
     expect(metadata?.payload).toMatchObject({
@@ -1080,6 +1086,27 @@ describe("Phase 7 baseline processing skeleton", () => {
         expect.objectContaining({
           pageNumber: 1,
           payloadRef: expect.objectContaining({ contentType: "image/png" })
+        })
+      ]
+    });
+    expect(layout?.payload).toMatchObject({
+      format: "pdf",
+      regions: [expect.objectContaining({ localId: "layout-region-1" })]
+    });
+    expect(ocrCandidates?.payload).toMatchObject({
+      format: "pdf",
+      candidates: [expect.objectContaining({ localId: "ocr-candidate-1" })]
+    });
+    expect(ocrText?.payload).toMatchObject({
+      format: "pdf",
+      texts: [expect.objectContaining({ text: "PRJ-001-R-KJ" })]
+    });
+    expect(tables?.payload).toMatchObject({
+      format: "pdf",
+      tables: [expect.objectContaining({ localId: "table-1" })],
+      rows: [
+        expect.objectContaining({
+          cells: [expect.objectContaining({ value: "PRJ-001-R-KJ" })]
         })
       ]
     });
@@ -2172,8 +2199,8 @@ function createBaselinePipelineFixture(
     projectStructure,
     baselineProcessing,
     eventing,
-    ...(options.objectStorage ? { objectStorage: options.objectStorage } : {}),
-    ...(options.cvOcrClient ? { cvOcrClient: options.cvOcrClient } : {})
+    objectStorage: options.objectStorage ?? createObjectStorageDouble("pdf-bytes"),
+    cvOcrClient: options.cvOcrClient ?? createCvOcrClientDouble()
   });
 
   return {
@@ -2562,22 +2589,106 @@ function createCvOcrClientDouble(
     },
     detectPdfLayout: async () => ({
       adapter: { id: "test-layout", version: "1.0.0" },
-      regions: [],
+      regions: [
+        {
+          localId: "layout-region-1",
+          regionKind: "table_candidate",
+          location: {
+            bbox: {
+              pageNumber: 1,
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 100,
+              coordinateSystem: "page_px"
+            }
+          },
+          confidence: 0.9,
+          source: "test-layout"
+        }
+      ],
       diagnostics: []
     }),
     planPdfOcrCandidates: async () => ({
       adapter: { id: "test-ocr-plan", version: "1.0.0" },
-      candidates: [],
+      candidates: [
+        {
+          localId: "ocr-candidate-1",
+          targetKind: "table_cell",
+          sourceRegionId: "layout-region-1",
+          location: {
+            bbox: {
+              pageNumber: 1,
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 30,
+              coordinateSystem: "page_px"
+            }
+          },
+          expectedValueKind: "text"
+        }
+      ],
       diagnostics: []
     }),
     runPdfTargetedOcr: async () => ({
       adapter: { id: "test-ocr", version: "1.0.0" },
-      texts: [],
+      texts: [
+        {
+          localId: "ocr-text-1",
+          sourceCandidateId: "ocr-candidate-1",
+          text: "PRJ-001-R-KJ",
+          confidence: 0.95,
+          engine: "test-ocr",
+          engineVersion: "1.0.0"
+        }
+      ],
       diagnostics: []
     }),
     reconstructPdfTables: async () => ({
       adapter: { id: "test-tables", version: "1.0.0" },
-      tables: [],
+      tables: [
+        {
+          localId: "table-1",
+          sourceRegionId: "layout-region-1",
+          sourceRegionIds: ["layout-region-1"],
+          rows: [
+            [
+              {
+                rowIndex: 0,
+                columnIndex: 0,
+                text: "PRJ-001-R-KJ",
+                location: {
+                  bbox: {
+                    pageNumber: 1,
+                    x: 0,
+                    y: 0,
+                    width: 100,
+                    height: 30,
+                    coordinateSystem: "page_px"
+                  }
+                },
+                confidence: 0.95,
+                rowSpan: 1,
+                columnSpan: 1,
+                rawText: "PRJ-001-R-KJ",
+                sourceCandidateIds: ["ocr-candidate-1"],
+                selectedCandidateId: "ocr-candidate-1",
+                ocrQualityStatus: "recognized",
+                qualityFlags: [],
+                metadataJson: "{}"
+              }
+            ]
+          ],
+          coveragePolicy: "test",
+          qualityFlags: [],
+          missingOcrCandidateCount: 0,
+          missingOcrTextCount: 0,
+          lowConfidenceOcrCount: 0,
+          emptyOcrTextCount: 0,
+          metadataJson: "{}"
+        }
+      ],
       diagnostics: []
     }),
     close: () => undefined
