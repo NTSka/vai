@@ -228,10 +228,21 @@ export const typedDataSchema = z.object({
     z.object({
       id: z.string(),
       family: z.enum(["estimate", "drawing", "statement", "unsupported", "unknown"]),
-      data: z.record(z.string(), z.unknown()),
+      data: z.looseObject({}),
       producedByJobId: z.string().nullable(),
       createdAt: dateStringSchema,
       updatedAt: dateStringSchema
     })
-  )
+  ),
+  contentArtifacts: z.array(
+    z.object({
+      id: z.string(),
+      artifactType: z.string(),
+      payload: z.looseObject({}),
+      preview: z.looseObject({}),
+      producedByJobId: z.string().nullable(),
+      createdAt: dateStringSchema,
+      updatedAt: dateStringSchema
+    })
+  ).default([])
 });

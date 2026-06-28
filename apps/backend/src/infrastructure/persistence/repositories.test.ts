@@ -1667,6 +1667,24 @@ describe("Phase 8 backend read APIs", () => {
         })
       ])
     );
+    expect(typedData.json().contentArtifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactType: "pdf_rendered_pages",
+          preview: expect.objectContaining({
+            kind: "pdf_rendered_pages",
+            pageCount: 1
+          })
+        }),
+        expect.objectContaining({
+          artifactType: "pdf_text_layer",
+          preview: expect.objectContaining({
+            kind: "pdf_text_layer",
+            pages: [expect.objectContaining({ pageNumber: 1, text: "Fixture page text" })]
+          })
+        })
+      ])
+    );
 
     const content = await app.inject({
       method: "GET",

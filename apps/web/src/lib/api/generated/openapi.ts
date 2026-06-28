@@ -1109,6 +1109,21 @@ export interface paths {
                                 /** Format: date-time */
                                 updatedAt: string;
                             }[];
+                            contentArtifacts: {
+                                id: string;
+                                artifactType: string;
+                                payload: {
+                                    [key: string]: unknown;
+                                };
+                                preview: {
+                                    [key: string]: unknown;
+                                };
+                                producedByJobId: string | (null);
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                updatedAt: string;
+                            }[];
                         };
                     };
                 };

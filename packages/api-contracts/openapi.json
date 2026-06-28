@@ -2177,13 +2177,67 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "contentArtifacts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "artifactType": {
+                            "type": "string"
+                          },
+                          "payload": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "preview": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "producedByJobId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "artifactType",
+                          "payload",
+                          "preview",
+                          "producedByJobId",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
                     "organizationId",
                     "documentVersionId",
                     "state",
-                    "records"
+                    "records",
+                    "contentArtifacts"
                   ],
                   "additionalProperties": false
                 }

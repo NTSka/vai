@@ -199,6 +199,17 @@ const typedDataResponseSchema = z.object({
       createdAt: z.date(),
       updatedAt: z.date()
     })
+  ),
+  contentArtifacts: z.array(
+    z.object({
+      id: z.string(),
+      artifactType: z.string(),
+      payload: z.record(z.string(), z.unknown()),
+      preview: z.record(z.string(), z.unknown()),
+      producedByJobId: z.string().nullable(),
+      createdAt: z.date(),
+      updatedAt: z.date()
+    })
   )
 });
 
@@ -644,6 +655,10 @@ export async function registerBackendReadApiRoutes(
         organizationId: params.organizationId,
         documentVersionId
       });
+      const artifacts = await baselineFacts.listContentArtifacts({
+        organizationId: params.organizationId,
+        documentVersionId
+      });
 
       return {
         organizationId: params.organizationId,
@@ -656,7 +671,18 @@ export async function registerBackendReadApiRoutes(
           producedByJobId: record.producedByJobId ?? null,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt
-        }))
+        })),
+        contentArtifacts: await Promise.all(
+          artifacts.map(async (artifact) => ({
+            id: artifact.id,
+            artifactType: artifact.artifactType,
+            payload: artifact.payload,
+            preview: await buildContentArtifactDebugPreview(app, artifact.artifactType, artifact.payload),
+            producedByJobId: artifact.producedByJobId ?? null,
+            createdAt: artifact.createdAt,
+            updatedAt: artifact.updatedAt
+          }))
+        )
       };
     }
   );
@@ -895,6 +921,73 @@ async function parseXlsxCells(app: FastifyInstance, payload: Record<string, unkn
   });
 }
 
+async function buildContentArtifactDebugPreview(
+  app: FastifyInstance,
+  artifactType: string,
+  payload: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (artifactType === "xlsx_workbook") {
+    return {
+      kind: "xlsx_workbook",
+      sheets: parseXlsxSheets(payload)
+    };
+  }
+
+  if (artifactType === "xlsx_cells") {
+    const cells = await parseXlsxCells(app, payload);
+    return {
+      kind: "xlsx_cells",
+      cellCount: cells.length,
+      truncated: cells.length > 1000,
+      cells: cells.slice(0, 1000)
+    };
+  }
+
+  if (artifactType === "pdf_rendered_pages") {
+    const pages = parsePdfRenderedPages(payload);
+    return {
+      kind: "pdf_rendered_pages",
+      pageCount: pages.length,
+      pages: pages.map((page) => ({
+        pageNumber: page.pageNumber,
+        widthPx: page.widthPx,
+        heightPx: page.heightPx,
+        dpi: page.dpi,
+        contentType: page.payloadRef.contentType
+      }))
+    };
+  }
+
+  if (artifactType === "pdf_text_layer") {
+    const pages = Array.isArray(payload["pages"]) ? payload["pages"] : [];
+    const parsedPages = pages.flatMap((page) => {
+      if (!isRecord(page)) {
+        return [];
+      }
+      const pageNumber = readNumber(page["pageNumber"]);
+      if (!pageNumber) {
+        return [];
+      }
+      return [
+        {
+          pageNumber,
+          text: truncateDebugText(readString(page["text"]) ?? "")
+        }
+      ];
+    });
+    return {
+      kind: "pdf_text_layer",
+      pageCount: parsedPages.length,
+      pages: parsedPages
+    };
+  }
+
+  return {
+    kind: "raw_payload",
+    payload
+  };
+}
+
 async function readPayloadRef(app: FastifyInstance, payload: Record<string, unknown>) {
   const payloadRef = isRecord(payload["payloadRef"]) ? payload["payloadRef"] : undefined;
   const bucket = payloadRef ? readString(payloadRef["bucket"]) : undefined;
@@ -926,6 +1019,10 @@ function stringifyCellValue(value: unknown): string {
     return String(value);
   }
   return JSON.stringify(value);
+}
+
+function truncateDebugText(value: string): string {
+  return value.length > 20_000 ? `${value.slice(0, 20_000)}\n...[truncated]` : value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

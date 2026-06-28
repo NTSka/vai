@@ -93,6 +93,51 @@
           </div>
         {/if}
       </div>
+
+      <div class="panel mt-4 p-5">
+        <div class="flex items-start gap-3">
+          <Database size={18} class="mt-1 shrink-0 text-accent" aria-hidden="true" />
+          <div class="min-w-0">
+            <h2 class="text-lg font-semibold text-ink">Content debug</h2>
+            <p class="mt-1 text-sm text-slate-600">
+              Artifacts available to typed data extraction.
+            </p>
+          </div>
+        </div>
+
+        {#if typedData.contentArtifacts.length === 0}
+          <div class="mt-4 border border-line bg-panel p-4 text-sm text-slate-700">
+            Content artifacts are not available for this document version yet.
+          </div>
+        {:else}
+          <div class="mt-4 divide-y divide-line border border-line">
+            {#each typedData.contentArtifacts as artifact (artifact.id)}
+              <article class="p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <h3 class="text-sm font-semibold text-ink">{artifact.artifactType}</h3>
+                  <span class="text-xs text-slate-600">
+                    {artifact.producedByJobId ?? "no job"}
+                  </span>
+                </div>
+                <div class="mt-3 grid gap-3 lg:grid-cols-2">
+                  <section class="min-w-0">
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Preview
+                    </h4>
+                    <pre class="mt-2 max-h-[32rem] overflow-auto bg-slate-950 p-3 text-xs text-white">{JSON.stringify(artifact.preview, null, 2)}</pre>
+                  </section>
+                  <section class="min-w-0">
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Raw payload
+                    </h4>
+                    <pre class="mt-2 max-h-[32rem] overflow-auto bg-slate-950 p-3 text-xs text-white">{JSON.stringify(artifact.payload, null, 2)}</pre>
+                  </section>
+                </div>
+              </article>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
   </section>
 </main>
