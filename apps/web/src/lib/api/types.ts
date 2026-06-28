@@ -58,6 +58,11 @@ export type SourceDocumentMetadata = ResponseBody<
   "get",
   200
 >;
+export type SourceDocumentViewer = ResponseBody<
+  "/organizations/{organizationId}/source-documents/{documentVersionId}/viewer",
+  "get",
+  200
+>;
 
 export type TypedData = ResponseBody<
   "/organizations/{organizationId}/document-versions/{documentVersionId}/typed-data",

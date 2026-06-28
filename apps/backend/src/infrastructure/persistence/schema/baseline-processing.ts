@@ -3,6 +3,7 @@ import { foreignKey, index, jsonb, pgEnum, pgTable, uuid } from "drizzle-orm/pg-
 import { timestamps } from "./common.js";
 import { documentSets } from "./document-intake.js";
 import { organizations } from "./organizations.js";
+import type { BaselineProcessingWarning } from "../../../baseline-processing/warnings.js";
 
 export const baselineProcessingStatus = pgEnum("baseline_processing_status", [
   "processing",
@@ -31,15 +32,7 @@ export const baselineProcessingResults = pgTable(
       .$type<string[]>()
       .notNull(),
     warnings: jsonb("warnings")
-      .$type<
-        Array<{
-          code: string;
-          message: string;
-          documentVersionId?: string;
-          processingJobId?: string;
-          details?: Record<string, unknown>;
-        }>
-      >()
+      .$type<BaselineProcessingWarning[]>()
       .notNull(),
     ...timestamps
   },

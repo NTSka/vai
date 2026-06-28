@@ -19,12 +19,14 @@ import {
   registerBaselineProcessors
 } from "../../baseline-processing/pipeline.js";
 import type { ObjectStorageClient } from "../object-storage/plugin.js";
+import type { CvOcrClient } from "../cv-ocr/client.js";
 import { createEventBus } from "../../processing/event-bus.js";
 import { createOrchestratorRegistry } from "../../processing/orchestrator-registry.js";
 import {
   createProcessorRegistry,
   createProcessorRuntime
 } from "../../processing/processor-runtime.js";
+import { cleanupUnreferencedGeneratedArtifacts } from "../../storage/generated-artifact-cleanup.js";
 import * as schema from "./schema/index.js";
 import {
   createAccessControlRepository,
@@ -409,7 +411,12 @@ describe("Phase 3 repositories", () => {
       documentIdentityIds: [],
       projectStructureNodeIds: [],
       projectStructurePlacementIds: [],
-      warnings: [{ code: "unknown_document_type", message: "Unknown document type" }]
+      warnings: [
+        {
+          code: "document_identity_unplaced",
+          message: "Document identity could not be parsed for placement"
+        }
+      ]
     });
 
     expect(dependency.dependsOnJobId).toBe(validationJob.id);
@@ -962,6 +969,120 @@ describe("Phase 7 baseline processing skeleton", () => {
     ]);
   });
 
+  dbIt("treats legacy XLS files as unsupported instead of a third supported format", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "legacy-estimate.xls",
+      mimeType: "application/vnd.ms-excel",
+      extension: ".xls"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const [version] = await database
+      .select()
+      .from(schema.documentVersions)
+      .where(eq(schema.documentVersions.documentSetId, context.documentSet.id));
+    const [detection] = await database
+      .select()
+      .from(schema.fileFormatDetections)
+      .where(eq(schema.fileFormatDetections.documentVersionId, version?.id ?? ""));
+
+    expect(version?.status).toBe("unsupported");
+    expect(detection?.format).toBe("unsupported");
+    expect(detection?.reason).toBe("Unsupported extension or MIME type");
+  });
+
+  dbIt("persists PDF technical outputs and render artifact references", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const putObjects: Array<{
+      readonly bucket: string;
+      readonly key: string;
+      readonly contentLength: number;
+      readonly contentType?: string;
+    }> = [];
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-001-drawing.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database, {
+      objectStorage: createObjectStorageDoubleWithPuts("pdf-bytes", putObjects),
+      cvOcrClient: createCvOcrClientDouble()
+    });
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+
+    await runBaselinePipelineToIdle(fixture);
+
+    const [version] = await database
+      .select()
+      .from(schema.documentVersions)
+      .where(eq(schema.documentVersions.documentSetId, context.documentSet.id));
+    const artifacts = await database
+      .select()
+      .from(schema.contentArtifacts)
+      .where(eq(schema.contentArtifacts.documentVersionId, version?.id ?? ""));
+    const metadata = artifacts.find((artifact) => artifact.artifactType === "pdf_metadata");
+    const textLayer = artifacts.find((artifact) => artifact.artifactType === "pdf_text_layer");
+    const renderedPages = artifacts.find(
+      (artifact) => artifact.artifactType === "pdf_rendered_pages"
+    );
+
+    expect(version?.status).toBe("ready");
+    expect(metadata?.payload).toMatchObject({
+      format: "pdf",
+      metadata: { pageCount: 1, encrypted: false }
+    });
+    expect(textLayer?.payload).toMatchObject({
+      format: "pdf",
+      pages: [expect.objectContaining({ pageNumber: 1, text: "Drawing title" })]
+    });
+    expect(renderedPages?.payload).toMatchObject({
+      format: "pdf",
+      pages: [
+        expect.objectContaining({
+          pageNumber: 1,
+          payloadRef: expect.objectContaining({ contentType: "image/png" })
+        })
+      ]
+    });
+    expect(putObjects).toEqual([
+      expect.objectContaining({ contentType: "image/png", contentLength: 4 })
+    ]);
+  });
+
   dbIt("extracts XLSX workbook facts and cell content artifacts", async () => {
     const database = getDatabase();
     if (!database) return;
@@ -1399,7 +1520,7 @@ describe("Phase 8 backend read APIs", () => {
       documentSetId: context.documentSet.id,
       intakeStatus: "accepted",
       baselineStatus: "completed_with_warnings",
-      warnings: [{ code: "fixture_warning" }]
+      warnings: [{ code: "document_identity_unplaced" }]
     });
 
     const diagnostics = await app.inject({
@@ -1413,7 +1534,7 @@ describe("Phase 8 backend read APIs", () => {
       documentSetId: context.documentSet.id,
       documentSetStatus: "accepted",
       baselineStatus: "completed_with_warnings",
-      warnings: [{ code: "fixture_warning" }],
+      warnings: [{ code: "document_identity_unplaced" }],
       jobs: [expect.objectContaining({ id: context.job.id })],
       events: [expect.objectContaining({ type: "document_set.accepted" })]
     });
@@ -1492,6 +1613,33 @@ describe("Phase 8 backend read APIs", () => {
       downloadUrl: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content?disposition=attachment`
     });
 
+    const viewer = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${context.version.id}/viewer`,
+      headers: { cookie }
+    });
+    expect(viewer.statusCode).toBe(200);
+    expect(viewer.json()).toMatchObject({
+      viewer: "pdf",
+      sourceFileName: "source.pdf",
+      pages: [
+        {
+          pageNumber: 1,
+          imageUrl: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content/viewer-artifacts/pdf-rendered-pages/1`,
+          text: "Fixture page text"
+        }
+      ]
+    });
+
+    const renderedPage = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${context.version.id}/content/viewer-artifacts/pdf-rendered-pages/1`,
+      headers: { cookie }
+    });
+    expect(renderedPage.statusCode).toBe(200);
+    expect(renderedPage.body).toBe("pdf-content");
+    expect(renderedPage.headers["content-type"]).toContain("image/png");
+
     const typedData = await app.inject({
       method: "GET",
       url: `/organizations/${context.organization.id}/document-versions/${context.version.id}/typed-data`,
@@ -1520,6 +1668,108 @@ describe("Phase 8 backend read APIs", () => {
     expect(content.statusCode).toBe(200);
     expect(content.body).toBe("pdf-content");
     expect(content.headers["content-type"]).toContain("application/pdf");
+
+    await app.close();
+  });
+
+  dbIt("returns XLSX dedicated viewer data from workbook and cell artifacts", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createRegisteredDocumentContext(database, {
+      originalName: "estimate.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const baselineFacts = createBaselineFactsRepository(database);
+    await baselineFacts.upsertContentArtifact({
+      organizationId: context.organization.id,
+      documentVersionId: context.version.id,
+      artifactType: "xlsx_workbook",
+      payload: {
+        format: "xlsx",
+        workbook: {
+          sheets: [{ name: "Estimate", rowCount: 2, columnCount: 2 }]
+        }
+      },
+      producedByJobId: null
+    });
+    await baselineFacts.upsertContentArtifact({
+      organizationId: context.organization.id,
+      documentVersionId: context.version.id,
+      artifactType: "xlsx_cells",
+      payload: {
+        kind: "cell",
+        storage: "inline",
+        cells: [
+          {
+            location: {
+              kind: "xlsx",
+              sheetName: "Estimate",
+              cellAddress: "A1",
+              rowNumber: 1,
+              columnNumber: 1
+            },
+            value: "Code",
+            valueType: "string"
+          },
+          {
+            location: {
+              kind: "xlsx",
+              sheetName: "Estimate",
+              cellAddress: "B2",
+              rowNumber: 2,
+              columnNumber: 2
+            },
+            value: "42",
+            valueType: "number"
+          }
+        ]
+      },
+      producedByJobId: null
+    });
+    const app = await buildApp({
+      config,
+      logger: false,
+      database: {
+        query: getClient().query.bind(getClient()),
+        drizzle: database
+      },
+      objectStorage: createObjectStorageDouble("not-used"),
+      auth: createReadApiAuthOptions(context.organization.id)
+    });
+    const cookie = `vai_access_token=${createReadApiJwt().issuePair("read-api-user").accessToken}`;
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${context.version.id}/viewer`,
+      headers: { cookie }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      viewer: "xlsx",
+      sourceFileName: "estimate.xlsx",
+      sheets: [{ name: "Estimate", rowCount: 2, columnCount: 2 }],
+      cells: [
+        {
+          sheetName: "Estimate",
+          cellAddress: "A1",
+          rowNumber: 1,
+          columnNumber: 1,
+          value: "Code",
+          valueType: "string"
+        },
+        {
+          sheetName: "Estimate",
+          cellAddress: "B2",
+          rowNumber: 2,
+          columnNumber: 2,
+          value: "42",
+          valueType: "number"
+        }
+      ]
+    });
 
     await app.close();
   });
@@ -1556,6 +1806,154 @@ describe("Phase 8 backend read APIs", () => {
     });
 
     await app.close();
+  });
+});
+
+describe("Phase 13 hardening", () => {
+  dbIt("does not duplicate durable facts when delivered events are replayed", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-001-R-AR-drawing.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+    await runBaselinePipelineToIdle(fixture);
+    const before = await countBaselineDurableFacts(database, context.organization.id);
+
+    await database.delete(schema.eventConsumerCheckpoints);
+    await runBaselinePipelineToIdle(fixture);
+    const after = await countBaselineDurableFacts(database, context.organization.id);
+
+    expect(after).toEqual(before);
+  });
+
+  dbIt("replays accepted/document events into a fresh consumer state without duplicate projections", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createDocumentContext(database, {
+      originalName: "PRJ-002-R-AR-drawing.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+
+    await fixture.eventing.publish({
+      type: "document_set.accepted",
+      version: "1",
+      source: "document-intake",
+      aggregateType: "document_set",
+      aggregateId: context.documentSet.id,
+      payload: {
+        organizationId: context.organization.id,
+        documentSetId: context.documentSet.id,
+        originalFileIds: [context.storedFile.id],
+        acceptedFileIds: [context.storedFile.id]
+      }
+    });
+    await runBaselinePipelineToIdle(fixture);
+    const firstProjection = await countBaselineDurableFacts(database, context.organization.id);
+
+    await database.delete(schema.eventConsumerCheckpoints);
+    const replayFixture = createBaselinePipelineFixture(database);
+    await runBaselinePipelineToIdle(replayFixture);
+    const replayedProjection = await countBaselineDurableFacts(
+      database,
+      context.organization.id
+    );
+
+    expect(replayedProjection).toEqual(firstProjection);
+  });
+
+  dbIt("cleans only unreferenced generated artifact objects", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createRegisteredDocumentContext(database);
+    const intake = createDocumentIntakeRepository(database);
+    const baselineFacts = createBaselineFactsRepository(database);
+    const referencedGeneratedKey = `organizations/${context.organization.id}/generated-artifacts/${context.version.id}/referenced.png`;
+    const referencedContentKey = `organizations/${context.organization.id}/content-artifacts/${context.version.id}/cells.json`;
+    const staleGeneratedKey = `organizations/${context.organization.id}/generated-artifacts/${context.version.id}/stale.png`;
+    const staleContentKey = `organizations/${context.organization.id}/content-artifacts/${context.version.id}/stale.json`;
+    const deleted: string[] = [];
+    await intake.createStoredFile({
+      organizationId: context.organization.id,
+      originalName: "generated.png",
+      mimeType: "image/png",
+      extension: ".png",
+      sizeBytes: 4,
+      checksum: `generated-${randomUUID()}`,
+      checksumAlgorithm: "sha256",
+      storage: {
+        provider: "s3_compatible",
+        bucket: "vai-local-files",
+        key: referencedGeneratedKey
+      },
+      purpose: "generated_artifact"
+    });
+    await baselineFacts.upsertContentArtifact({
+      organizationId: context.organization.id,
+      documentVersionId: context.version.id,
+      artifactType: "cleanup_payload_ref",
+      payload: {
+        payloadRef: {
+          provider: "s3_compatible",
+          bucket: "vai-local-files",
+          key: referencedContentKey,
+          contentType: "application/json"
+        }
+      },
+      producedByJobId: null
+    });
+    const objectStorage = createListingObjectStorageDouble({
+      objects: [
+        referencedGeneratedKey,
+        referencedContentKey,
+        staleGeneratedKey,
+        staleContentKey,
+        "original/should-never-be-scanned.pdf"
+      ],
+      deleted
+    });
+
+    const dryRun = await cleanupUnreferencedGeneratedArtifacts({
+      db: database,
+      objectStorage,
+      bucket: "vai-local-files"
+    });
+    expect(dryRun.dryRun).toBe(true);
+    expect(dryRun.deletedKeys).toEqual([staleContentKey, staleGeneratedKey].sort());
+    expect(deleted).toEqual([]);
+
+    const executed = await cleanupUnreferencedGeneratedArtifacts({
+      db: database,
+      objectStorage,
+      bucket: "vai-local-files",
+      execute: true
+    });
+    expect(executed.dryRun).toBe(false);
+    expect(deleted.sort()).toEqual([staleContentKey, staleGeneratedKey].sort());
+    expect(deleted).not.toContain(context.storedFile.storage.key);
+    expect(deleted).not.toContain(referencedGeneratedKey);
+    expect(deleted).not.toContain(referencedContentKey);
   });
 });
 
@@ -1722,7 +2120,10 @@ async function createDocumentContext(
 
 function createBaselinePipelineFixture(
   database: TestDb,
-  options: { readonly objectStorage?: ObjectStorageClient } = {}
+  options: {
+    readonly objectStorage?: ObjectStorageClient;
+    readonly cvOcrClient?: CvOcrClient;
+  } = {}
 ) {
   const processing = createProcessingRepository(database);
   const documentIntake = createDocumentIntakeRepository(database);
@@ -1745,7 +2146,8 @@ function createBaselinePipelineFixture(
     projectStructure,
     baselineProcessing,
     eventing,
-    ...(options.objectStorage ? { objectStorage: options.objectStorage } : {})
+    ...(options.objectStorage ? { objectStorage: options.objectStorage } : {}),
+    ...(options.cvOcrClient ? { cvOcrClient: options.cvOcrClient } : {})
   });
 
   return {
@@ -1773,8 +2175,15 @@ async function runBaselinePipelineToIdle(
   throw new Error("Baseline pipeline did not become idle");
 }
 
-async function createRegisteredDocumentContext(database: TestDb) {
-  const context = await createDocumentContext(database);
+async function createRegisteredDocumentContext(
+  database: TestDb,
+  file: {
+    readonly originalName?: string;
+    readonly mimeType?: string;
+    readonly extension?: string;
+  } = {}
+) {
+  const context = await createDocumentContext(database, file);
   const registry = createDocumentRegistryRepository(database);
   const document = await registry.createDocument({
     organizationId: context.organization.id
@@ -1854,6 +2263,39 @@ async function createReadApiHttpFixture(database: TestDb) {
     data: { source: "secondary-fixture" },
     producedByJobId: job.id
   });
+  await baselineFacts.upsertContentArtifact({
+    organizationId: context.organization.id,
+    documentVersionId: context.version.id,
+    artifactType: "pdf_rendered_pages",
+    payload: {
+      format: "pdf",
+      pages: [
+        {
+          pageNumber: 1,
+          widthPx: 100,
+          heightPx: 120,
+          dpi: 144,
+          payloadRef: {
+            provider: "s3_compatible",
+            bucket: "vai-local-files",
+            key: "generated/page-1.png",
+            contentType: "image/png"
+          }
+        }
+      ]
+    },
+    producedByJobId: job.id
+  });
+  await baselineFacts.upsertContentArtifact({
+    organizationId: context.organization.id,
+    documentVersionId: context.version.id,
+    artifactType: "pdf_text_layer",
+    payload: {
+      format: "pdf",
+      pages: [{ pageNumber: 1, text: "Fixture page text", words: [] }]
+    },
+    producedByJobId: job.id
+  });
   const identity = await baselineFacts.upsertDocumentIdentity({
     organizationId: context.organization.id,
     documentId: context.document.id,
@@ -1892,7 +2334,12 @@ async function createReadApiHttpFixture(database: TestDb) {
     documentIdentityIds: [identity.id],
     projectStructureNodeIds: [node.id],
     projectStructurePlacementIds: [placement.id],
-    warnings: [{ code: "fixture_warning", message: "Fixture warning" }]
+    warnings: [
+      {
+        code: "document_identity_unplaced",
+        message: "Document identity could not be parsed for placement"
+      }
+    ]
   });
 
   return { ...context, identity, node, placement, job };
@@ -1961,7 +2408,142 @@ function createObjectStorageDouble(content: string | Uint8Array): ObjectStorageC
     putObject: async () => undefined,
     deleteObject: async () => undefined,
     getObject: async () => Readable.from([content]),
+    listObjects: async () => [],
     destroy: () => undefined
+  };
+}
+
+function createObjectStorageDoubleWithPuts(
+  content: string | Uint8Array,
+  putObjects: Array<{
+    readonly bucket: string;
+    readonly key: string;
+    readonly contentLength: number;
+    readonly contentType?: string;
+  }>
+): ObjectStorageClient {
+  return {
+    headBucket: async () => undefined,
+    putObject: async (input) => {
+      putObjects.push({
+        bucket: input.bucket,
+        key: input.key,
+        contentLength: input.contentLength,
+        ...(input.contentType ? { contentType: input.contentType } : {})
+      });
+    },
+    deleteObject: async () => undefined,
+    getObject: async () => Readable.from([content]),
+    listObjects: async () => [],
+    destroy: () => undefined
+  };
+}
+
+function createListingObjectStorageDouble(input: {
+  readonly objects: readonly string[];
+  readonly deleted: string[];
+}): ObjectStorageClient {
+  return {
+    headBucket: async () => undefined,
+    putObject: async () => undefined,
+    deleteObject: async (object) => {
+      input.deleted.push(object.key);
+    },
+    getObject: async () => {
+      throw new Error("not used");
+    },
+    listObjects: async (request) =>
+      input.objects
+        .filter((key) => key.startsWith(request.prefix))
+        .map((key) => ({ key })),
+    destroy: () => undefined
+  };
+}
+
+function createCvOcrClientDouble(): CvOcrClient {
+  return {
+    checkHealth: async () => ({ status: "ok", service: "test-cv-ocr", version: "test" }),
+    extractPdfMetadata: async () => ({
+      adapter: { id: "test-pdf", version: "1.0.0" },
+      metadata: {
+        pageCount: 1,
+        encrypted: false,
+        title: "Fixture",
+        author: "",
+        pages: [
+          {
+            pageNumber: 1,
+            widthPoints: 595,
+            heightPoints: 842,
+            rotationDegrees: 0
+          }
+        ]
+      },
+      diagnostics: []
+    }),
+    extractPdfTextLayer: async () => ({
+      adapter: { id: "test-pdf", version: "1.0.0" },
+      pages: [
+        {
+          pageNumber: 1,
+          text: "Drawing title",
+          words: [
+            {
+              text: "Drawing",
+              bbox: {
+                pageNumber: 1,
+                x: 10,
+                y: 10,
+                width: 50,
+                height: 12,
+                coordinateSystem: "page_points"
+              },
+              blockIndex: 0,
+              lineIndex: 0,
+              wordIndex: 0
+            }
+          ]
+        }
+      ],
+      diagnostics: []
+    }),
+    renderPdfPages: async () => ({
+      adapter: { id: "test-pdf", version: "1.0.0" },
+      pages: [
+        {
+          pageNumber: 1,
+          widthPx: 100,
+          heightPx: 100,
+          dpi: 144,
+          imageFormat: "png",
+          sha256: "render-sha",
+          sizeBytes: 4,
+          content: new Uint8Array([1, 2, 3, 4])
+        }
+      ],
+      diagnostics: []
+    }),
+    detectPdfLayout: async () => ({
+      adapter: { id: "test-layout", version: "1.0.0" },
+      regions: [],
+      diagnostics: []
+    }),
+    planPdfOcrCandidates: async () => ({
+      adapter: { id: "test-ocr-plan", version: "1.0.0" },
+      candidates: [],
+      diagnostics: []
+    }),
+    runPdfTargetedOcr: async () => ({
+      adapter: { id: "test-ocr", version: "1.0.0" },
+      texts: [],
+      diagnostics: []
+    }),
+    reconstructPdfTables: async () => ({
+      adapter: { id: "test-tables", version: "1.0.0" },
+      tables: [],
+      diagnostics: []
+    }),
+    close: () => undefined
   };
 }
 
@@ -1983,4 +2565,49 @@ async function countRows(
   where: SQL<unknown> | undefined
 ): Promise<number> {
   return database.$count(table, where);
+}
+
+async function countBaselineDurableFacts(database: TestDb, organizationId: string) {
+  return {
+    documents: await countRows(
+      database,
+      schema.documents,
+      eq(schema.documents.organizationId, organizationId)
+    ),
+    documentVersions: await countRows(
+      database,
+      schema.documentVersions,
+      eq(schema.documentVersions.organizationId, organizationId)
+    ),
+    processingJobs: await countRows(
+      database,
+      schema.processingJobs,
+      eq(schema.processingJobs.organizationId, organizationId)
+    ),
+    contentArtifacts: await countRows(
+      database,
+      schema.contentArtifacts,
+      eq(schema.contentArtifacts.organizationId, organizationId)
+    ),
+    documentIdentities: await countRows(
+      database,
+      schema.documentIdentities,
+      eq(schema.documentIdentities.organizationId, organizationId)
+    ),
+    projectStructureNodes: await countRows(
+      database,
+      schema.projectStructureNodes,
+      eq(schema.projectStructureNodes.organizationId, organizationId)
+    ),
+    projectStructurePlacements: await countRows(
+      database,
+      schema.projectStructurePlacements,
+      eq(schema.projectStructurePlacements.organizationId, organizationId)
+    ),
+    baselineResults: await countRows(
+      database,
+      schema.baselineProcessingResults,
+      eq(schema.baselineProcessingResults.organizationId, organizationId)
+    )
+  };
 }

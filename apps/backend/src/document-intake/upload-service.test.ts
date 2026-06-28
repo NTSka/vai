@@ -135,6 +135,9 @@ function createObjectStorageDouble(input: {
     async getObject() {
       throw new Error("not used");
     },
+    async listObjects() {
+      return [];
+    },
     destroy() {
       return undefined;
     }

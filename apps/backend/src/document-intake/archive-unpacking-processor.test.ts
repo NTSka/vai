@@ -125,6 +125,9 @@ function createArchiveFixture(input: {
     async getObject() {
       return Readable.from(input.archive);
     },
+    async listObjects() {
+      return [];
+    },
     destroy() {
       return undefined;
     }

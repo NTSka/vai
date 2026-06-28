@@ -7,15 +7,8 @@ import {
   createEventingRepository,
   createProcessingRepository
 } from "../../infrastructure/persistence/repositories.js";
+import { baselineWarningSchema } from "../../baseline-processing/warnings.js";
 import { HttpError } from "../http-error.js";
-
-const warningSchema = z.object({
-  code: z.string(),
-  message: z.string(),
-  documentVersionId: z.string().optional(),
-  processingJobId: z.string().optional(),
-  details: z.record(z.string(), z.unknown()).optional()
-});
 
 const diagnosticsResponseSchema = z.object({
   organizationId: z.string(),
@@ -24,7 +17,7 @@ const diagnosticsResponseSchema = z.object({
   baselineStatus: z
     .enum(["not_started", "processing", "completed", "completed_with_warnings", "failed"])
     .default("not_started"),
-  warnings: z.array(warningSchema),
+  warnings: z.array(baselineWarningSchema),
   jobs: z.array(
     z.object({
       id: z.string(),

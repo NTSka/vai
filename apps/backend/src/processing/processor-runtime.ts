@@ -13,6 +13,7 @@ import type { EventingRepository } from "../infrastructure/persistence/repositor
 import type { ProcessingRepository } from "../infrastructure/persistence/repositories/processing-orchestration.js";
 import type { ProjectStructureRepository } from "../infrastructure/persistence/repositories/project-structure.js";
 import type * as schema from "../infrastructure/persistence/schema/index.js";
+import type { CvOcrClient } from "../infrastructure/cv-ocr/client.js";
 
 type ProcessingJob = typeof schema.processingJobs.$inferSelect;
 
@@ -230,6 +231,7 @@ export function createDefaultProcessorRegistry(input: {
   readonly eventing: EventingRepository;
   readonly bucket: string;
   readonly objectStorage: import("../infrastructure/object-storage/plugin.js").ObjectStorageClient;
+  readonly cvOcrClient?: CvOcrClient;
   readonly persistExtractedArchiveFiles: PersistExtractedArchiveFiles;
   readonly completeAcceptedInputValidation: CompleteAcceptedInputValidation;
 }): ProcessorRegistry {
@@ -278,7 +280,8 @@ export function createDefaultProcessorRegistry(input: {
     projectStructure: input.projectStructure,
     baselineProcessing: input.baselineProcessing,
     eventing: input.eventing,
-    objectStorage: input.objectStorage
+    objectStorage: input.objectStorage,
+    ...(input.cvOcrClient ? { cvOcrClient: input.cvOcrClient } : {})
   });
   inputDocumentIntakeForRuntime.set(registry, input.documentIntake);
 

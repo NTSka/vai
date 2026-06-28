@@ -20,6 +20,7 @@ const healthyObjectStorage: ObjectStorageClient = {
   getObject: async () => {
     throw new Error("not used");
   },
+  listObjects: async () => [],
   destroy: () => undefined
 };
 
@@ -149,6 +150,7 @@ describe("backend app", () => {
         getObject: async () => {
           throw new Error("not used");
         },
+        listObjects: async () => [],
         destroy: () => undefined
       }
     });

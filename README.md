@@ -99,6 +99,16 @@ pnpm --filter @vai/backend health:check
 
 The command reports database and object-storage availability separately.
 
+Generated artifact cleanup is dry-run by default:
+
+```bash
+pnpm --filter @vai/backend storage:cleanup-generated
+pnpm --filter @vai/backend storage:cleanup-generated -- --execute
+```
+
+The command only scans generated artifact prefixes and does not delete original
+upload objects.
+
 Backend database-backed integration tests require `TEST_DATABASE_URL`:
 
 ```bash

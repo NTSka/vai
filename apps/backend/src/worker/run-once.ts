@@ -13,6 +13,7 @@ import {
   createProjectStructureRepository
 } from "../infrastructure/persistence/repositories.js";
 import { createObjectStorageClient } from "../infrastructure/object-storage/plugin.js";
+import { createCvOcrGrpcClient } from "../infrastructure/cv-ocr/client.js";
 import * as schema from "../infrastructure/persistence/schema/index.js";
 import {
   createDefaultProcessorRegistry,
@@ -38,11 +39,18 @@ export async function runWorkerOnce(): Promise<WorkerRunResult> {
   try {
     const db = drizzle(client, { schema: schema.schema });
     const objectStorage = createObjectStorageClient(config.objectStorage);
-    const runtime = createRuntime(db, config.objectStorage.bucket, objectStorage);
+    const cvOcrClient = createCvOcrGrpcClient({ address: config.cvOcrServiceUrl });
+    const runtime = createRuntime(
+      db,
+      config.objectStorage.bucket,
+      objectStorage,
+      cvOcrClient
+    );
 
     try {
       return await runtime.runNext();
     } finally {
+      cvOcrClient.close();
       objectStorage.destroy();
     }
   } finally {
@@ -61,7 +69,13 @@ export async function runWorkerLoop(
   try {
     const db = drizzle(client, { schema: schema.schema });
     const objectStorage = createObjectStorageClient(config.objectStorage);
-    const runtime = createRuntime(db, config.objectStorage.bucket, objectStorage);
+    const cvOcrClient = createCvOcrGrpcClient({ address: config.cvOcrServiceUrl });
+    const runtime = createRuntime(
+      db,
+      config.objectStorage.bucket,
+      objectStorage,
+      cvOcrClient
+    );
 
     try {
       while (!options.signal?.aborted) {
@@ -73,6 +87,7 @@ export async function runWorkerLoop(
         }
       }
     } finally {
+      cvOcrClient.close();
       objectStorage.destroy();
     }
   } finally {
@@ -83,7 +98,8 @@ export async function runWorkerLoop(
 function createRuntime(
   db: NodePgDatabase<typeof schema.schema>,
   bucket: string,
-  objectStorage: ReturnType<typeof createObjectStorageClient>
+  objectStorage: ReturnType<typeof createObjectStorageClient>,
+  cvOcrClient: ReturnType<typeof createCvOcrGrpcClient>
 ): { runNext(): Promise<WorkerRunResult> } {
   const processing = createProcessingRepository(db);
   const documentIntake = createDocumentIntakeRepository(db);
@@ -106,6 +122,7 @@ function createRuntime(
     eventing,
     bucket,
     objectStorage,
+    cvOcrClient,
     persistExtractedArchiveFiles: async (input) =>
       db.transaction(async (tx) => {
         const intake = createDocumentIntakeRepository(tx);

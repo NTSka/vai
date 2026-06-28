@@ -20,6 +20,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "pnpm build && node --env-file-if-exists=.env --enable-source-maps dist/cli/seed-mvp.js",
+    "storage:cleanup-generated": "pnpm build && node --env-file-if-exists=.env --enable-source-maps dist/cli/cleanup-generated-artifacts.js",
     "openapi:export": "pnpm build && node --enable-source-maps dist/cli/export-openapi.js",
     "health:check": "pnpm build && node --enable-source-maps dist/cli/health-check.js",
     "test": "vitest run",

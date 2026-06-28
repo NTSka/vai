@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
@@ -26,6 +27,10 @@ export type ObjectStorageClient = {
     readonly bucket: string;
     readonly key: string;
   }) => Promise<Readable>;
+  readonly listObjects: (input: {
+    readonly bucket: string;
+    readonly prefix: string;
+  }) => Promise<ReadonlyArray<{ readonly key: string }>>;
   readonly destroy: () => void;
 };
 
@@ -78,6 +83,26 @@ export function createObjectStorageClient(
         throw new Error("Object storage response body is not a readable stream");
       }
       return response.Body as Readable;
+    },
+    listObjects: async (input) => {
+      const objects: Array<{ readonly key: string }> = [];
+      let continuationToken: string | undefined;
+      do {
+        const response = await client.send(
+          new ListObjectsV2Command({
+            Bucket: input.bucket,
+            Prefix: input.prefix,
+            ContinuationToken: continuationToken
+          })
+        );
+        for (const object of response.Contents ?? []) {
+          if (object.Key) {
+            objects.push({ key: object.Key });
+          }
+        }
+        continuationToken = response.NextContinuationToken;
+      } while (continuationToken);
+      return objects;
     },
     destroy: () => client.destroy()
   };

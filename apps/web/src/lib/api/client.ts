@@ -7,6 +7,7 @@ import {
   projectTreeSchema,
   sessionSchema,
   sourceDocumentMetadataSchema,
+  sourceDocumentViewerSchema,
   typedDataSchema,
   uploadResponseSchema
 } from "./schemas";
@@ -17,6 +18,7 @@ import type {
   ProjectTree,
   Session,
   SourceDocumentMetadata,
+  SourceDocumentViewer,
   TypedData,
   UploadResponse
 } from "./types";
@@ -188,6 +190,19 @@ export const api = {
         input.organizationId
       )}/source-documents/${encodeURIComponent(input.documentVersionId)}`,
       sourceDocumentMetadataSchema
+    );
+  },
+
+  sourceDocumentViewer(
+    fetcher: ApiFetch,
+    input: { organizationId: string; documentVersionId: string }
+  ) {
+    return request<SourceDocumentViewer>(
+      fetcher,
+      `/organizations/${encodeURIComponent(
+        input.organizationId
+      )}/source-documents/${encodeURIComponent(input.documentVersionId)}/viewer`,
+      sourceDocumentViewerSchema
     );
   },
 

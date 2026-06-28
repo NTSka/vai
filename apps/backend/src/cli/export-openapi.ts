@@ -49,6 +49,7 @@ const objectStorage: ObjectStorageClient = {
   getObject: async () => {
     throw new Error("OpenAPI export does not read object storage");
   },
+  listObjects: async () => [],
   destroy: () => undefined
 };
 

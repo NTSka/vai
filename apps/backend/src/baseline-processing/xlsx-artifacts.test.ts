@@ -119,6 +119,7 @@ function createObjectStorageDouble(content: Uint8Array): ObjectStorageClient {
     putObject: async () => undefined,
     deleteObject: async () => undefined,
     getObject: async () => Readable.from([content]),
+    listObjects: async () => [],
     destroy: () => undefined
   };
 }

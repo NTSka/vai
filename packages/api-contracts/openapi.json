@@ -668,7 +668,13 @@
                         "type": "object",
                         "properties": {
                           "code": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "unsupported_file_format",
+                              "document_version_processing_failed",
+                              "document_identity_unplaced",
+                              "project_structure_placement_ambiguous"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -1024,7 +1030,13 @@
                         "type": "object",
                         "properties": {
                           "code": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "unsupported_file_format",
+                              "document_version_processing_failed",
+                              "document_identity_unplaced",
+                              "project_structure_placement_ambiguous"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -1685,6 +1697,290 @@
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/source-documents/{documentVersionId}/viewer": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Read dedicated source viewer data for PDF and XLSX documents.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "documentVersionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "viewer": {
+                          "type": "string",
+                          "enum": [
+                            "pdf"
+                          ]
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "documentVersionId": {
+                          "type": "string"
+                        },
+                        "sourceFileName": {
+                          "type": "string"
+                        },
+                        "downloadUrl": {
+                          "type": "string"
+                        },
+                        "pages": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "pageNumber": {
+                                "type": "number"
+                              },
+                              "widthPx": {
+                                "type": "number"
+                              },
+                              "heightPx": {
+                                "type": "number"
+                              },
+                              "dpi": {
+                                "type": "number"
+                              },
+                              "imageUrl": {
+                                "type": "string"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "pageNumber",
+                              "widthPx",
+                              "heightPx",
+                              "dpi",
+                              "imageUrl"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "viewer",
+                        "organizationId",
+                        "documentVersionId",
+                        "sourceFileName",
+                        "downloadUrl",
+                        "pages"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "viewer": {
+                          "type": "string",
+                          "enum": [
+                            "xlsx"
+                          ]
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "documentVersionId": {
+                          "type": "string"
+                        },
+                        "sourceFileName": {
+                          "type": "string"
+                        },
+                        "downloadUrl": {
+                          "type": "string"
+                        },
+                        "sheets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "rowCount": {
+                                "type": "number"
+                              },
+                              "columnCount": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "rowCount",
+                              "columnCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "cells": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sheetName": {
+                                "type": "string"
+                              },
+                              "cellAddress": {
+                                "type": "string"
+                              },
+                              "rowNumber": {
+                                "type": "number"
+                              },
+                              "columnNumber": {
+                                "type": "number"
+                              },
+                              "value": {
+                                "type": "string"
+                              },
+                              "valueType": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sheetName",
+                              "cellAddress",
+                              "rowNumber",
+                              "columnNumber",
+                              "value",
+                              "valueType"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "viewer",
+                        "organizationId",
+                        "documentVersionId",
+                        "sourceFileName",
+                        "downloadUrl",
+                        "sheets",
+                        "cells"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "viewer": {
+                          "type": "string",
+                          "enum": [
+                            "fallback"
+                          ]
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "documentVersionId": {
+                          "type": "string"
+                        },
+                        "sourceFileName": {
+                          "type": "string"
+                        },
+                        "downloadUrl": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "viewer",
+                        "organizationId",
+                        "documentVersionId",
+                        "sourceFileName",
+                        "downloadUrl",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/source-documents/{documentVersionId}/content/viewer-artifacts/pdf-rendered-pages/{pageNumber}": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "Proxy one generated PDF rendered page after organization authorization.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "documentVersionId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": true,
+              "maximum": 9007199254740991,
+              "minimum": 0
+            },
+            "in": "path",
+            "name": "pageNumber",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary rendered PDF page stream.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Binary rendered PDF page stream."
                 }
               }
             }

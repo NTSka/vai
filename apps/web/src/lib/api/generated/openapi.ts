@@ -528,7 +528,8 @@ export interface paths {
                              */
                             baselineStatus: "not_started" | "processing" | "completed" | "completed_with_warnings" | "failed";
                             warnings: {
-                                code: string;
+                                /** @enum {string} */
+                                code: "unsupported_file_format" | "document_version_processing_failed" | "document_identity_unplaced" | "project_structure_placement_ambiguous";
                                 message: string;
                                 documentVersionId?: string;
                                 processingJobId?: string;
@@ -627,7 +628,8 @@ export interface paths {
                              */
                             baselineStatus: "not_started" | "processing" | "completed" | "completed_with_warnings" | "failed";
                             warnings: {
-                                code: string;
+                                /** @enum {string} */
+                                code: "unsupported_file_format" | "document_version_processing_failed" | "document_identity_unplaced" | "project_structure_placement_ambiguous";
                                 message: string;
                                 documentVersionId?: string;
                                 processingJobId?: string;
@@ -910,6 +912,128 @@ export interface paths {
                     content: {
                         "application/pdf": string;
                         "application/octet-stream": string;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{organizationId}/source-documents/{documentVersionId}/viewer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Read dedicated source viewer data for PDF and XLSX documents. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    organizationId: string;
+                    documentVersionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            viewer: "pdf";
+                            organizationId: string;
+                            documentVersionId: string;
+                            sourceFileName: string;
+                            downloadUrl: string;
+                            pages: {
+                                pageNumber: number;
+                                widthPx: number;
+                                heightPx: number;
+                                dpi: number;
+                                imageUrl: string;
+                                text?: string;
+                            }[];
+                        } | {
+                            /** @enum {string} */
+                            viewer: "xlsx";
+                            organizationId: string;
+                            documentVersionId: string;
+                            sourceFileName: string;
+                            downloadUrl: string;
+                            sheets: {
+                                name: string;
+                                rowCount: number;
+                                columnCount: number;
+                            }[];
+                            cells: {
+                                sheetName: string;
+                                cellAddress: string;
+                                rowNumber: number;
+                                columnNumber: number;
+                                value: string;
+                                valueType: string;
+                            }[];
+                        } | {
+                            /** @enum {string} */
+                            viewer: "fallback";
+                            organizationId: string;
+                            documentVersionId: string;
+                            sourceFileName: string;
+                            downloadUrl: string;
+                            reason: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{organizationId}/source-documents/{documentVersionId}/content/viewer-artifacts/pdf-rendered-pages/{pageNumber}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Proxy one generated PDF rendered page after organization authorization. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    organizationId: string;
+                    documentVersionId: string;
+                    pageNumber: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Binary rendered PDF page stream. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": unknown;
                     };
                 };
             };

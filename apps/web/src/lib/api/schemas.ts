@@ -29,7 +29,12 @@ export const uploadResponseSchema = z.object({
 });
 
 export const warningSchema = z.object({
-  code: z.string(),
+  code: z.enum([
+    "unsupported_file_format",
+    "document_version_processing_failed",
+    "document_identity_unplaced",
+    "project_structure_placement_ambiguous"
+  ]),
   message: z.string(),
   documentVersionId: z.string().optional(),
   processingJobId: z.string().optional(),
@@ -137,6 +142,58 @@ export const sourceDocumentMetadataSchema = z.object({
     })
   })
 });
+
+export const sourceDocumentViewerSchema = z.discriminatedUnion("viewer", [
+  z.object({
+    viewer: z.literal("pdf"),
+    organizationId: z.string(),
+    documentVersionId: z.string(),
+    sourceFileName: z.string(),
+    downloadUrl: z.string(),
+    pages: z.array(
+      z.object({
+        pageNumber: z.number(),
+        widthPx: z.number(),
+        heightPx: z.number(),
+        dpi: z.number(),
+        imageUrl: z.string(),
+        text: z.string().optional()
+      })
+    )
+  }),
+  z.object({
+    viewer: z.literal("xlsx"),
+    organizationId: z.string(),
+    documentVersionId: z.string(),
+    sourceFileName: z.string(),
+    downloadUrl: z.string(),
+    sheets: z.array(
+      z.object({
+        name: z.string(),
+        rowCount: z.number(),
+        columnCount: z.number()
+      })
+    ),
+    cells: z.array(
+      z.object({
+        sheetName: z.string(),
+        cellAddress: z.string(),
+        rowNumber: z.number(),
+        columnNumber: z.number(),
+        value: z.string(),
+        valueType: z.string()
+      })
+    )
+  }),
+  z.object({
+    viewer: z.literal("fallback"),
+    organizationId: z.string(),
+    documentVersionId: z.string(),
+    sourceFileName: z.string(),
+    downloadUrl: z.string(),
+    reason: z.string()
+  })
+]);
 
 export const typedDataSchema = z.object({
   organizationId: z.string(),

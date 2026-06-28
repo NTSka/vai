@@ -1,7 +1,14 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import type { Readable } from "node:stream";
 
 import { z } from "zod";
+import type {
+  CorrelationId,
+  DocumentVersionId,
+  StoredFileId,
+  TechnicalStoredFileRef
+} from "@vai/domain-contracts";
 
 import type { BaselineFactsRepository } from "../infrastructure/persistence/repositories/baseline-facts.js";
 import type { BaselineProcessingRepository } from "../infrastructure/persistence/repositories/baseline-processing.js";
@@ -17,6 +24,10 @@ import {
   type ProcessorRegistry
 } from "../processing/processor-runtime.js";
 import type { ObjectStorageClient } from "../infrastructure/object-storage/plugin.js";
+import type {
+  CvOcrClient,
+  PdfTechnicalInput
+} from "../infrastructure/cv-ocr/client.js";
 import {
   buildXlsxCellsPayload,
   buildXlsxWorkbookPayload,
@@ -34,6 +45,7 @@ import {
   buildTypedDataPayload as buildSemanticTypedDataPayload,
   inferFamily as inferSemanticFamily
 } from "./semantic-baseline.js";
+import { createBaselineWarning } from "./warnings.js";
 
 type ProcessingJob = typeof schema.processingJobs.$inferSelect;
 type DomainEvent = typeof schema.domainEvents.$inferSelect;
@@ -131,6 +143,7 @@ export function registerBaselineProcessors(input: {
   readonly baselineProcessing: BaselineProcessingRepository;
   readonly eventing: EventingRepository;
   readonly objectStorage?: ObjectStorageClient;
+  readonly cvOcrClient?: CvOcrClient;
 }): void {
   input.registry.register({
     processorId: "document_registrar",
@@ -383,6 +396,7 @@ async function executeFileTechnicalPlaceholder(
     readonly documentRegistry: DocumentRegistryRepository;
     readonly eventing: EventingRepository;
     readonly objectStorage?: ObjectStorageClient;
+    readonly cvOcrClient?: CvOcrClient;
   },
   job: ProcessingJob
 ): Promise<void> {
@@ -393,6 +407,30 @@ async function executeFileTechnicalPlaceholder(
   });
   if (!detection || detection.format === "unsupported") {
     await failJob(input.processing, job, "supported_format_required", payload);
+    return;
+  }
+
+  if (detection.format === "pdf" && input.objectStorage && input.cvOcrClient) {
+    const storedFile = await input.baselineFacts.findStoredFileForVersion({
+      organizationId: job.organizationId,
+      documentVersionId: payload.documentVersionId
+    });
+    if (!storedFile) {
+      await failJob(input.processing, job, "stored_file_not_found", payload);
+      return;
+    }
+
+    await persistPdfTechnicalOutputs({
+      baselineFacts: input.baselineFacts,
+      objectStorage: input.objectStorage,
+      cvOcrClient: input.cvOcrClient,
+      job,
+      payload,
+      storedFile
+    });
+    await completeJobAndPublishEvents(input.processing, job, [
+      buildVersionEvent(job, "file_technical.completed", payload)
+    ]);
     return;
   }
 
@@ -800,20 +838,16 @@ async function executeBaselineSummary(
   const warnings = versions.flatMap((version) => {
     if (version.status === "unsupported") {
       return [
-        {
-          code: "unsupported_file_format",
-          message: "Document version uses an unsupported file format",
+        createBaselineWarning("unsupported_file_format", {
           documentVersionId: version.id
-        }
+        })
       ];
     }
     if (version.status === "failed") {
       return [
-        {
-          code: "document_version_processing_failed",
-          message: "Document version processing failed",
+        createBaselineWarning("document_version_processing_failed", {
           documentVersionId: version.id
-        }
+        })
       ];
     }
     const identity = identities.find(
@@ -821,11 +855,9 @@ async function executeBaselineSummary(
     );
     if (identity && identity.parseStatus !== "parsed") {
       return [
-        {
-          code: "document_identity_unplaced",
-          message: "Document identity could not be parsed for placement",
+        createBaselineWarning("document_identity_unplaced", {
           documentVersionId: version.id
-        }
+        })
       ];
     }
     const placement = placements.find(
@@ -833,11 +865,9 @@ async function executeBaselineSummary(
     );
     if (placement?.status === "ambiguous") {
       return [
-        {
-          code: "project_structure_placement_ambiguous",
-          message: "Document placement is ambiguous and requires review",
+        createBaselineWarning("project_structure_placement_ambiguous", {
           documentVersionId: version.id
-        }
+        })
       ];
     }
     return [];
@@ -940,7 +970,7 @@ function buildVersionEvent(
 function detectFormat(file: {
   readonly extension: string | null;
   readonly mimeType: string | null;
-}): "pdf" | "xlsx" | "xls" | "unsupported" {
+}): "pdf" | "xlsx" | "unsupported" {
   const extension = file.extension?.toLowerCase();
   if (extension === ".pdf" || file.mimeType === "application/pdf") return "pdf";
   if (
@@ -950,7 +980,6 @@ function detectFormat(file: {
   ) {
     return "xlsx";
   }
-  if (extension === ".xls" || file.mimeType === "application/vnd.ms-excel") return "xls";
   return "unsupported";
 }
 
@@ -1181,6 +1210,235 @@ async function loadXlsxWorkbookForProcessor(input: {
     }
     throw error;
   }
+}
+
+async function persistPdfTechnicalOutputs(input: {
+  readonly baselineFacts: BaselineFactsRepository;
+  readonly objectStorage: ObjectStorageClient;
+  readonly cvOcrClient: CvOcrClient;
+  readonly job: ProcessingJob;
+  readonly payload: z.infer<typeof documentVersionPayloadSchema>;
+  readonly storedFile: typeof schema.storedFiles.$inferSelect;
+}): Promise<void> {
+  const sourceBucket = input.storedFile.storage.bucket;
+  if (!sourceBucket) {
+    throw new ProcessorExecutionError({
+      code: "pdf_source_bucket_missing",
+      message: "PDF source file is missing an object storage bucket",
+      retryable: false,
+      details: {
+        storedFileId: input.storedFile.id,
+        documentVersionId: input.payload.documentVersionId
+      }
+    });
+  }
+
+  const content = await readObjectBytes({
+    objectStorage: input.objectStorage,
+    bucket: sourceBucket,
+    key: input.storedFile.storage.key,
+    code: "pdf_source_read_failed"
+  });
+  const pdfInput: PdfTechnicalInput = {
+    file: buildTechnicalStoredFileRef(input.storedFile, input.payload.documentVersionId),
+    content,
+    ...(input.job.correlationId
+      ? { correlationId: input.job.correlationId as CorrelationId }
+      : {})
+  };
+
+  try {
+    const [metadata, textLayer, renderedPages] = await Promise.all([
+      input.cvOcrClient.extractPdfMetadata(pdfInput),
+      input.cvOcrClient.extractPdfTextLayer(pdfInput),
+      input.cvOcrClient.renderPdfPages({
+        ...pdfInput,
+        profile: { dpi: 144, imageFormat: "png", maxPagePixels: 16_000_000 }
+      })
+    ]);
+
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_metadata",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_metadata", version: "1.0.0" },
+        adapter: metadata.adapter,
+        metadata: metadata.metadata,
+        diagnostics: metadata.diagnostics
+      },
+      producedByJobId: input.job.id
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_text_layer",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_text_layer", version: "1.0.0" },
+        adapter: textLayer.adapter,
+        pages: textLayer.pages,
+        diagnostics: textLayer.diagnostics
+      },
+      producedByJobId: input.job.id
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_rendered_pages",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_rendered_pages", version: "1.0.0" },
+        adapter: renderedPages.adapter,
+        pages: await storePdfRenderedPages({
+          organizationId: input.job.organizationId,
+          documentVersionId: input.payload.documentVersionId,
+          jobId: input.job.id,
+          objectStorage: input.objectStorage,
+          bucket: sourceBucket,
+          pages: renderedPages.pages
+        }),
+        diagnostics: renderedPages.diagnostics
+      },
+      producedByJobId: input.job.id
+    });
+  } catch (error) {
+    throw classifyPdfTechnicalError(error);
+  }
+}
+
+function buildTechnicalStoredFileRef(
+  storedFile: typeof schema.storedFiles.$inferSelect,
+  documentVersionId: string
+): TechnicalStoredFileRef {
+  return {
+    documentVersionId: documentVersionId as DocumentVersionId,
+    storedFileId: storedFile.id as StoredFileId,
+    originalName: storedFile.originalName,
+    mimeType: storedFile.mimeType ?? "application/pdf",
+    sizeBytes: storedFile.sizeBytes,
+    checksum: storedFile.checksum,
+    checksumAlgorithm: storedFile.checksumAlgorithm
+  };
+}
+
+async function storePdfRenderedPages(input: {
+  readonly organizationId: string;
+  readonly documentVersionId: string;
+  readonly jobId: string;
+  readonly objectStorage: ObjectStorageClient;
+  readonly bucket: string;
+  readonly pages: Awaited<ReturnType<CvOcrClient["renderPdfPages"]>>["pages"];
+}): Promise<ReadonlyArray<Record<string, unknown>>> {
+  const refs: Record<string, unknown>[] = [];
+  for (const page of input.pages) {
+    const key = [
+      "organizations",
+      input.organizationId,
+      "generated-artifacts",
+      input.documentVersionId,
+      `${input.jobId}-page-${page.pageNumber}-${randomUUID()}.png`
+    ].join("/");
+    try {
+      await input.objectStorage.putObject({
+        bucket: input.bucket,
+        key,
+        body: page.content,
+        contentType: "image/png",
+        contentLength: page.content.byteLength
+      });
+    } catch (error) {
+      throw new ProcessorExecutionError({
+        code: "pdf_render_write_failed",
+        message: "PDF rendered page could not be written to object storage",
+        retryable: true,
+        details: {
+          bucket: input.bucket,
+          key,
+          cause: error instanceof Error ? error.message : String(error)
+        }
+      });
+    }
+
+    refs.push({
+      pageNumber: page.pageNumber,
+      widthPx: page.widthPx,
+      heightPx: page.heightPx,
+      dpi: page.dpi,
+      imageFormat: page.imageFormat,
+      sha256: page.sha256,
+      sizeBytes: page.sizeBytes,
+      payloadRef: {
+        provider: "s3_compatible",
+        bucket: input.bucket,
+        key,
+        contentType: "image/png",
+        byteLength: page.content.byteLength
+      }
+    });
+  }
+  return refs;
+}
+
+async function readObjectBytes(input: {
+  readonly objectStorage: ObjectStorageClient;
+  readonly bucket: string;
+  readonly key: string;
+  readonly code: string;
+}): Promise<Uint8Array> {
+  try {
+    const stream = await input.objectStorage.getObject({
+      bucket: input.bucket,
+      key: input.key
+    });
+    return await readStream(stream);
+  } catch (error) {
+    throw new ProcessorExecutionError({
+      code: input.code,
+      message: "Object storage content could not be read",
+      retryable: true,
+      details: {
+        bucket: input.bucket,
+        key: input.key,
+        cause: error instanceof Error ? error.message : String(error)
+      }
+    });
+  }
+}
+
+async function readStream(stream: Readable): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+function classifyPdfTechnicalError(error: unknown): ProcessorExecutionError {
+  if (error instanceof ProcessorExecutionError) {
+    return error;
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "retryable" in error &&
+    "code" in error
+  ) {
+    const retryable = (error as { retryable?: unknown }).retryable === true;
+    const code = (error as { code?: unknown }).code;
+    return new ProcessorExecutionError({
+      code: typeof code === "string" ? code : "pdf_technical_extraction_failed",
+      message: error instanceof Error ? error.message : "PDF technical extraction failed",
+      retryable,
+      details: { category: retryable ? "external_service" : "deterministic" }
+    });
+  }
+  return new ProcessorExecutionError({
+    code: "pdf_technical_extraction_failed",
+    message: error instanceof Error ? error.message : "PDF technical extraction failed",
+    retryable: false
+  });
 }
 
 async function storeXlsxCellPayload(input: {
