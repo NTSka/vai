@@ -28,7 +28,7 @@ from vai_cv_ocr_service.pdf_operations import (
     render_pdf_pages,
 )
 
-_GENERATED_ROOT = Path(__file__).resolve().parents[2] / "generated"
+_GENERATED_ROOT = Path(__file__).resolve().parents[1] / "generated"
 if str(_GENERATED_ROOT) not in sys.path:
     sys.path.append(str(_GENERATED_ROOT))
 

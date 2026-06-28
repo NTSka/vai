@@ -121,9 +121,12 @@ export const api = {
     });
   },
 
-  upload(fetcher: ApiFetch, files: FileList | File[]) {
+  upload(
+    fetcher: ApiFetch,
+    input: { organizationId: string; files: FileList | File[] }
+  ) {
     const form = new FormData();
-    for (const file of Array.from(files)) {
+    for (const file of Array.from(input.files)) {
       form.append("files", file);
     }
 
@@ -133,7 +136,10 @@ export const api = {
       uploadResponseSchema,
       {
         method: "POST",
-        body: form
+        body: form,
+        headers: {
+          "x-organization-id": input.organizationId
+        }
       }
     );
   },

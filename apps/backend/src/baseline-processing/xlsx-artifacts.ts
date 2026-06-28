@@ -107,7 +107,10 @@ export function buildXlsxWorkbookPayload(workbook: ExcelJS.Workbook): Record<str
         rowCount: sheet.rowCount,
         actualRowCount: sheet.actualRowCount,
         columnCount: sheet.columnCount,
-        actualColumnCount: sheet.actualColumnCount
+        actualColumnCount: sheet.actualColumnCount,
+        columns: collectWorksheetColumns(sheet),
+        rows: collectWorksheetRows(sheet),
+        merges: collectWorksheetMerges(sheet)
       }))
     }
   };
@@ -161,6 +164,112 @@ function collectWorksheetCells(sheet: ExcelJS.Worksheet): Record<string, unknown
     });
   });
   return cells;
+}
+
+function collectWorksheetColumns(sheet: ExcelJS.Worksheet): Record<string, unknown>[] {
+  const maxColumn = Math.max(sheet.columnCount, sheet.actualColumnCount);
+  const columns: Record<string, unknown>[] = [];
+  for (let index = 1; index <= maxColumn; index += 1) {
+    const column = sheet.getColumn(index);
+    columns.push({
+      index,
+      width: column.width,
+      widthPx: excelColumnWidthToPixels(column.width),
+      hidden: column.hidden === true
+    });
+  }
+  return columns;
+}
+
+function collectWorksheetRows(sheet: ExcelJS.Worksheet): Record<string, unknown>[] {
+  const maxRow = Math.max(sheet.rowCount, sheet.actualRowCount);
+  const rows: Record<string, unknown>[] = [];
+  for (let index = 1; index <= maxRow; index += 1) {
+    const row = sheet.getRow(index);
+    rows.push({
+      index,
+      height: row.height,
+      heightPx: excelRowHeightToPixels(row.height),
+      hidden: row.hidden === true
+    });
+  }
+  return rows;
+}
+
+function collectWorksheetMerges(sheet: ExcelJS.Worksheet): Record<string, unknown>[] {
+  const model = sheet.model as { readonly merges?: readonly string[] };
+  return (model.merges ?? []).flatMap((range) => {
+    const parsed = parseCellRange(range);
+    if (!parsed) {
+      return [];
+    }
+    return [
+      {
+        range,
+        startRow: parsed.start.row,
+        startColumn: parsed.start.column,
+        endRow: parsed.end.row,
+        endColumn: parsed.end.column,
+        rowSpan: parsed.end.row - parsed.start.row + 1,
+        columnSpan: parsed.end.column - parsed.start.column + 1
+      }
+    ];
+  });
+}
+
+function parseCellRange(range: string):
+  | {
+      readonly start: { readonly row: number; readonly column: number };
+      readonly end: { readonly row: number; readonly column: number };
+    }
+  | undefined {
+  const parts = range.split(":");
+  const startRaw = parts[0];
+  const endRaw = parts[1] ?? startRaw;
+  if (!startRaw || !endRaw) {
+    return undefined;
+  }
+  const start = parseCellAddress(startRaw);
+  const end = parseCellAddress(endRaw);
+  if (!start || !end) {
+    return undefined;
+  }
+  return {
+    start: {
+      row: Math.min(start.row, end.row),
+      column: Math.min(start.column, end.column)
+    },
+    end: {
+      row: Math.max(start.row, end.row),
+      column: Math.max(start.column, end.column)
+    }
+  };
+}
+
+function parseCellAddress(address: string):
+  | { readonly row: number; readonly column: number }
+  | undefined {
+  const match = /^([A-Z]+)(\d+)$/i.exec(address);
+  const letters = match?.[1];
+  const row = match?.[2];
+  if (!letters || !row) {
+    return undefined;
+  }
+  return {
+    row: Number(row),
+    column: [...letters.toUpperCase()].reduce(
+      (total, letter) => total * 26 + letter.charCodeAt(0) - 64,
+      0
+    )
+  };
+}
+
+function excelColumnWidthToPixels(width: number | undefined): number {
+  return Math.max(32, Math.round((width ?? 8.43) * 7 + 5));
+}
+
+function excelRowHeightToPixels(height: number | undefined): number {
+  return Math.max(18, Math.round(((height ?? 15) * 96) / 72));
 }
 
 function normalizeCellValue(cell: ExcelJS.Cell): {

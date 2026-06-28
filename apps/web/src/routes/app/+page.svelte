@@ -31,6 +31,7 @@
   let documentsLoading = false;
   let documentsError = "";
   let pollHandle: ReturnType<typeof setInterval> | undefined;
+  let refreshInFlight = false;
 
   $: organization = $currentOrganization;
   $: selectedTitle = getSelectedTitle(tree, selectedNodeId);
@@ -88,7 +89,11 @@
     uploadError = "";
 
     try {
-      const result = await api.upload(fetch, files);
+      if (!organization) {
+        uploadError = "No organization membership is available for upload.";
+        return;
+      }
+      const result = await api.upload(fetch, { organizationId: organization.id, files });
       latestDocumentSetId = result.documentSetId;
       await refreshWorkspace();
     } catch (error) {
@@ -105,7 +110,11 @@
     if (!organization) {
       return;
     }
+    if (refreshInFlight) {
+      return;
+    }
 
+    refreshInFlight = true;
     try {
       const [nextProgress, nextTree] = await Promise.all([
         api.progress(fetch, organization.id),
@@ -124,7 +133,11 @@
       const nextSelectedNodeId =
         selectedNodeId || nextTree.nodes[0]?.id || nextTree.fallbackGroups[0]?.id || "";
       if (nextSelectedNodeId) {
-        await selectNode(nextSelectedNodeId);
+        if (nextSelectedNodeId !== selectedNodeId) {
+          await selectNode(nextSelectedNodeId);
+        } else {
+          await loadDocuments(nextSelectedNodeId, { quiet: options.quiet });
+        }
       }
     } catch (error) {
       if (!options.quiet) {
@@ -133,6 +146,8 @@
             ? error.message
             : "Unable to refresh workspace state.";
       }
+    } finally {
+      refreshInFlight = false;
     }
   }
 
@@ -141,13 +156,15 @@
     await loadDocuments(nodeId);
   }
 
-  async function loadDocuments(nodeId: string) {
+  async function loadDocuments(nodeId: string, options: { quiet?: boolean } = {}) {
     if (!organization) {
       return;
     }
 
-    documentsLoading = true;
-    documentsError = "";
+    if (!options.quiet) {
+      documentsLoading = true;
+      documentsError = "";
+    }
     try {
       const result = await api.nodeDocuments(fetch, {
         organizationId: organization.id,
@@ -155,11 +172,15 @@
       });
       selectedDocuments = result.documents;
     } catch (error) {
-      selectedDocuments = [];
-      documentsError =
-        error instanceof ApiError ? error.message : "Unable to load documents.";
+      if (!options.quiet) {
+        selectedDocuments = [];
+        documentsError =
+          error instanceof ApiError ? error.message : "Unable to load documents.";
+      }
     } finally {
-      documentsLoading = false;
+      if (!options.quiet) {
+        documentsLoading = false;
+      }
     }
   }
 

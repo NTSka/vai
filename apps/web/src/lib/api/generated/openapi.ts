@@ -976,6 +976,25 @@ export interface paths {
                                 name: string;
                                 rowCount: number;
                                 columnCount: number;
+                                columns: {
+                                    index: number;
+                                    widthPx: number;
+                                    hidden: boolean;
+                                }[];
+                                rows: {
+                                    index: number;
+                                    heightPx: number;
+                                    hidden: boolean;
+                                }[];
+                                merges: {
+                                    range: string;
+                                    startRow: number;
+                                    startColumn: number;
+                                    endRow: number;
+                                    endColumn: number;
+                                    rowSpan: number;
+                                    columnSpan: number;
+                                }[];
                             }[];
                             cells: {
                                 sheetName: string;

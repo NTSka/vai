@@ -137,7 +137,32 @@ const sourceDocumentViewerResponseSchema = z.discriminatedUnion("viewer", [
       z.object({
         name: z.string(),
         rowCount: z.number(),
-        columnCount: z.number()
+        columnCount: z.number(),
+        columns: z.array(
+          z.object({
+            index: z.number(),
+            widthPx: z.number(),
+            hidden: z.boolean()
+          })
+        ),
+        rows: z.array(
+          z.object({
+            index: z.number(),
+            heightPx: z.number(),
+            hidden: z.boolean()
+          })
+        ),
+        merges: z.array(
+          z.object({
+            range: z.string(),
+            startRow: z.number(),
+            startColumn: z.number(),
+            endRow: z.number(),
+            endColumn: z.number(),
+            rowSpan: z.number(),
+            columnSpan: z.number()
+          })
+        )
       })
     ),
     cells: z.array(
@@ -774,9 +799,72 @@ function parseXlsxSheets(payload: Record<string, unknown>) {
       {
         name,
         rowCount: readNumber(sheet["rowCount"]) ?? 0,
-        columnCount: readNumber(sheet["columnCount"]) ?? 0
+        columnCount: readNumber(sheet["columnCount"]) ?? 0,
+        columns: parseXlsxColumns(sheet["columns"]),
+        rows: parseXlsxRows(sheet["rows"]),
+        merges: parseXlsxMerges(sheet["merges"])
       }
     ];
+  });
+}
+
+function parseXlsxColumns(value: unknown) {
+  const columns = Array.isArray(value) ? value : [];
+  return columns.flatMap((column) => {
+    if (!isRecord(column)) {
+      return [];
+    }
+    const index = readNumber(column["index"]);
+    if (!index) {
+      return [];
+    }
+    return [
+      {
+        index,
+        widthPx: readNumber(column["widthPx"]) ?? 64,
+        hidden: column["hidden"] === true
+      }
+    ];
+  });
+}
+
+function parseXlsxRows(value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.flatMap((row) => {
+    if (!isRecord(row)) {
+      return [];
+    }
+    const index = readNumber(row["index"]);
+    if (!index) {
+      return [];
+    }
+    return [
+      {
+        index,
+        heightPx: readNumber(row["heightPx"]) ?? 20,
+        hidden: row["hidden"] === true
+      }
+    ];
+  });
+}
+
+function parseXlsxMerges(value: unknown) {
+  const merges = Array.isArray(value) ? value : [];
+  return merges.flatMap((merge) => {
+    if (!isRecord(merge)) {
+      return [];
+    }
+    const range = readString(merge["range"]);
+    const startRow = readNumber(merge["startRow"]);
+    const startColumn = readNumber(merge["startColumn"]);
+    const endRow = readNumber(merge["endRow"]);
+    const endColumn = readNumber(merge["endColumn"]);
+    const rowSpan = readNumber(merge["rowSpan"]);
+    const columnSpan = readNumber(merge["columnSpan"]);
+    if (!range || !startRow || !startColumn || !endRow || !endColumn || !rowSpan || !columnSpan) {
+      return [];
+    }
+    return [{ range, startRow, startColumn, endRow, endColumn, rowSpan, columnSpan }];
   });
 }
 

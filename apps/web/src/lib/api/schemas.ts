@@ -171,7 +171,32 @@ export const sourceDocumentViewerSchema = z.discriminatedUnion("viewer", [
       z.object({
         name: z.string(),
         rowCount: z.number(),
-        columnCount: z.number()
+        columnCount: z.number(),
+        columns: z.array(
+          z.object({
+            index: z.number(),
+            widthPx: z.number(),
+            hidden: z.boolean()
+          })
+        ),
+        rows: z.array(
+          z.object({
+            index: z.number(),
+            heightPx: z.number(),
+            hidden: z.boolean()
+          })
+        ),
+        merges: z.array(
+          z.object({
+            range: z.string(),
+            startRow: z.number(),
+            startColumn: z.number(),
+            endRow: z.number(),
+            endColumn: z.number(),
+            rowSpan: z.number(),
+            columnSpan: z.number()
+          })
+        )
       })
     ),
     cells: z.array(

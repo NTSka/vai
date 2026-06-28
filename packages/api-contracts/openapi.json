@@ -1837,12 +1837,100 @@
                               },
                               "columnCount": {
                                 "type": "number"
+                              },
+                              "columns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "index": {
+                                      "type": "number"
+                                    },
+                                    "widthPx": {
+                                      "type": "number"
+                                    },
+                                    "hidden": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "index",
+                                    "widthPx",
+                                    "hidden"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "rows": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "index": {
+                                      "type": "number"
+                                    },
+                                    "heightPx": {
+                                      "type": "number"
+                                    },
+                                    "hidden": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "index",
+                                    "heightPx",
+                                    "hidden"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "merges": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "range": {
+                                      "type": "string"
+                                    },
+                                    "startRow": {
+                                      "type": "number"
+                                    },
+                                    "startColumn": {
+                                      "type": "number"
+                                    },
+                                    "endRow": {
+                                      "type": "number"
+                                    },
+                                    "endColumn": {
+                                      "type": "number"
+                                    },
+                                    "rowSpan": {
+                                      "type": "number"
+                                    },
+                                    "columnSpan": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "range",
+                                    "startRow",
+                                    "startColumn",
+                                    "endRow",
+                                    "endColumn",
+                                    "rowSpan",
+                                    "columnSpan"
+                                  ],
+                                  "additionalProperties": false
+                                }
                               }
                             },
                             "required": [
                               "name",
                               "rowCount",
-                              "columnCount"
+                              "columnCount",
+                              "columns",
+                              "rows",
+                              "merges"
                             ],
                             "additionalProperties": false
                           }
