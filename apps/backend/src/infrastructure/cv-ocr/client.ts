@@ -141,6 +141,7 @@ export function createCvOcrGrpcClient(input: {
   readonly address: string;
   readonly protoPath?: string;
   readonly deadlineMs?: number;
+  readonly maxMessageBytes?: number;
 }): CvOcrClient {
   const packageDefinition = protoLoader.loadSync(input.protoPath ?? defaultProtoPath(), {
     defaults: true,
@@ -151,9 +152,13 @@ export function createCvOcrGrpcClient(input: {
   const loaded = grpc.loadPackageDefinition(packageDefinition) as unknown as ProtoRoot;
   const client = new loaded.vai.cv_ocr.v1.CvOcrService(
     input.address,
-    grpc.credentials.createInsecure()
+    grpc.credentials.createInsecure(),
+    {
+      "grpc.max_send_message_length": input.maxMessageBytes ?? 512 * 1024 * 1024,
+      "grpc.max_receive_message_length": input.maxMessageBytes ?? 512 * 1024 * 1024
+    }
   ) as CvOcrGrpcClient;
-  const deadlineMs = input.deadlineMs ?? 30_000;
+  const deadlineMs = input.deadlineMs ?? 300_000;
 
   return {
     checkHealth: () =>

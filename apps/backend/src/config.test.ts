@@ -32,4 +32,15 @@ describe("backend config", () => {
 
     expect(config.objectStorage.forcePathStyle).toBe(false);
   });
+
+  it("parses CV/OCR processing limits", () => {
+    const config = loadBackendConfig({
+      ...requiredEnv,
+      CV_OCR_DEADLINE_MS: "600000",
+      CV_OCR_GRPC_MAX_MESSAGE_BYTES: "1073741824"
+    });
+
+    expect(config.cvOcrDeadlineMs).toBe(600_000);
+    expect(config.cvOcrGrpcMaxMessageBytes).toBe(1_073_741_824);
+  });
 });

@@ -1020,6 +1020,11 @@ describe("Phase 7 baseline processing skeleton", () => {
       readonly contentLength: number;
       readonly contentType?: string;
     }> = [];
+    const renderProfiles: Array<{
+      readonly dpi: number;
+      readonly imageFormat: string;
+      readonly maxPagePixels: number;
+    }> = [];
     const context = await createDocumentContext(database, {
       originalName: "PRJ-001-drawing.pdf",
       mimeType: "application/pdf",
@@ -1027,7 +1032,7 @@ describe("Phase 7 baseline processing skeleton", () => {
     });
     const fixture = createBaselinePipelineFixture(database, {
       objectStorage: createObjectStorageDoubleWithPuts("pdf-bytes", putObjects),
-      cvOcrClient: createCvOcrClientDouble()
+      cvOcrClient: createCvOcrClientDouble({ renderProfiles })
     });
 
     await fixture.eventing.publish({
@@ -1078,6 +1083,9 @@ describe("Phase 7 baseline processing skeleton", () => {
         })
       ]
     });
+    expect(renderProfiles).toEqual([
+      { dpi: 300, imageFormat: "png", maxPagePixels: 256_000_000 }
+    ]);
     expect(putObjects).toEqual([
       expect.objectContaining({ contentType: "image/png", contentLength: 4 })
     ]);
@@ -2460,7 +2468,15 @@ function createListingObjectStorageDouble(input: {
   };
 }
 
-function createCvOcrClientDouble(): CvOcrClient {
+function createCvOcrClientDouble(
+  options: {
+    readonly renderProfiles?: Array<{
+      readonly dpi: number;
+      readonly imageFormat: string;
+      readonly maxPagePixels: number;
+    }>;
+  } = {}
+): CvOcrClient {
   return {
     checkHealth: async () => ({ status: "ok", service: "test-cv-ocr", version: "test" }),
     extractPdfMetadata: async () => ({
@@ -2507,22 +2523,25 @@ function createCvOcrClientDouble(): CvOcrClient {
       ],
       diagnostics: []
     }),
-    renderPdfPages: async () => ({
-      adapter: { id: "test-pdf", version: "1.0.0" },
-      pages: [
-        {
-          pageNumber: 1,
-          widthPx: 100,
-          heightPx: 100,
-          dpi: 144,
-          imageFormat: "png",
-          sha256: "render-sha",
-          sizeBytes: 4,
-          content: new Uint8Array([1, 2, 3, 4])
-        }
-      ],
-      diagnostics: []
-    }),
+    renderPdfPages: async (input) => {
+      options.renderProfiles?.push(input.profile);
+      return {
+        adapter: { id: "test-pdf", version: "1.0.0" },
+        pages: [
+          {
+            pageNumber: 1,
+            widthPx: 100,
+            heightPx: 100,
+            dpi: input.profile.dpi,
+            imageFormat: "png",
+            sha256: "render-sha",
+            sizeBytes: 4,
+            content: new Uint8Array([1, 2, 3, 4])
+          }
+        ],
+        diagnostics: []
+      };
+    },
     detectPdfLayout: async () => ({
       adapter: { id: "test-layout", version: "1.0.0" },
       regions: [],

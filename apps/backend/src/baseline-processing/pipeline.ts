@@ -52,6 +52,8 @@ type DomainEvent = typeof schema.domainEvents.$inferSelect;
 type PendingEvent = Omit<typeof schema.domainEvents.$inferInsert, "id">;
 
 const processorVersion = "1.0.0";
+const pdfRenderDpi = 300;
+const pdfRenderMaxPagePixels = 256_000_000;
 
 const documentRegistrationPayloadSchema = z.object({
   documentSetId: z.string().min(1),
@@ -1253,7 +1255,11 @@ async function persistPdfTechnicalOutputs(input: {
       input.cvOcrClient.extractPdfTextLayer(pdfInput),
       input.cvOcrClient.renderPdfPages({
         ...pdfInput,
-        profile: { dpi: 144, imageFormat: "png", maxPagePixels: 16_000_000 }
+        profile: {
+          dpi: pdfRenderDpi,
+          imageFormat: "png",
+          maxPagePixels: pdfRenderMaxPagePixels
+        }
       })
     ]);
 

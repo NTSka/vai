@@ -39,7 +39,11 @@ export async function runWorkerOnce(): Promise<WorkerRunResult> {
   try {
     const db = drizzle(client, { schema: schema.schema });
     const objectStorage = createObjectStorageClient(config.objectStorage);
-    const cvOcrClient = createCvOcrGrpcClient({ address: config.cvOcrServiceUrl });
+    const cvOcrClient = createCvOcrGrpcClient({
+      address: config.cvOcrServiceUrl,
+      deadlineMs: config.cvOcrDeadlineMs,
+      maxMessageBytes: config.cvOcrGrpcMaxMessageBytes
+    });
     const runtime = createRuntime(
       db,
       config.objectStorage.bucket,
@@ -69,7 +73,11 @@ export async function runWorkerLoop(
   try {
     const db = drizzle(client, { schema: schema.schema });
     const objectStorage = createObjectStorageClient(config.objectStorage);
-    const cvOcrClient = createCvOcrGrpcClient({ address: config.cvOcrServiceUrl });
+    const cvOcrClient = createCvOcrGrpcClient({
+      address: config.cvOcrServiceUrl,
+      deadlineMs: config.cvOcrDeadlineMs,
+      maxMessageBytes: config.cvOcrGrpcMaxMessageBytes
+    });
     const runtime = createRuntime(
       db,
       config.objectStorage.bucket,
