@@ -63,5 +63,7 @@ Set these values for the COI compose runtime:
 - `S3_FORCE_PATH_STYLE=false`
 - `JWT_ACCESS_SECRET`
 - `JWT_REFRESH_SECRET`
+- `AUTH_COOKIE_SECURE=false` when serving the MVP over plain HTTP.
+  Use `true` once the public entrypoint is HTTPS.
 
 The backend and worker use `cv-ocr-service:50051` inside the compose network.

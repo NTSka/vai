@@ -53,7 +53,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const tokens = app.jwtIssuer.issuePair(session.user.id);
-      const secureCookies = app.config.nodeEnv === "production";
+      const secureCookies = app.config.authCookieSecure;
 
       reply.header("set-cookie", [
         serializeAuthCookie({
@@ -103,7 +103,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       }
     },
     async (_request, reply) => {
-      const secureCookies = app.config.nodeEnv === "production";
+      const secureCookies = app.config.authCookieSecure;
       reply.header("set-cookie", [
         serializeClearedCookie({
           name: accessTokenCookieName,

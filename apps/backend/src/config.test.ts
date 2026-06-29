@@ -43,4 +43,24 @@ describe("backend config", () => {
     expect(config.cvOcrDeadlineMs).toBe(600_000);
     expect(config.cvOcrGrpcMaxMessageBytes).toBe(1_073_741_824);
   });
+
+  it("defaults secure auth cookies to production only", () => {
+    expect(loadBackendConfig(requiredEnv).authCookieSecure).toBe(false);
+    expect(
+      loadBackendConfig({
+        ...requiredEnv,
+        NODE_ENV: "production"
+      }).authCookieSecure
+    ).toBe(true);
+  });
+
+  it("allows overriding secure auth cookies", () => {
+    expect(
+      loadBackendConfig({
+        ...requiredEnv,
+        NODE_ENV: "production",
+        AUTH_COOKIE_SECURE: "false"
+      }).authCookieSecure
+    ).toBe(false);
+  });
 });

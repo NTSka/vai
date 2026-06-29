@@ -35,6 +35,7 @@ const exportConfig: BackendConfig = {
     accessSecret: "openapi-export-access-secret",
     refreshSecret: "openapi-export-refresh-secret"
   },
+  authCookieSecure: false,
   cvOcrServiceUrl: "localhost:50051",
   cvOcrDeadlineMs: 300_000,
   cvOcrGrpcMaxMessageBytes: 512 * 1024 * 1024

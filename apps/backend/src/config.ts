@@ -21,6 +21,7 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: booleanFromString,
   JWT_ACCESS_SECRET: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().min(1),
+  AUTH_COOKIE_SECURE: z.enum(["true", "false"]).optional(),
   CV_OCR_SERVICE_URL: z.string().min(1),
   CV_OCR_DEADLINE_MS: z.coerce.number().int().positive().default(300_000),
   CV_OCR_GRPC_MAX_MESSAGE_BYTES: z.coerce
@@ -47,6 +48,7 @@ export type BackendConfig = {
     readonly accessSecret: string;
     readonly refreshSecret: string;
   };
+  readonly authCookieSecure: boolean;
   readonly cvOcrServiceUrl: string;
   readonly cvOcrDeadlineMs: number;
   readonly cvOcrGrpcMaxMessageBytes: number;
@@ -84,6 +86,10 @@ export function loadBackendConfig(
       accessSecret: value.JWT_ACCESS_SECRET,
       refreshSecret: value.JWT_REFRESH_SECRET
     },
+    authCookieSecure:
+      value.AUTH_COOKIE_SECURE === undefined
+        ? value.NODE_ENV === "production"
+        : value.AUTH_COOKIE_SECURE === "true",
     cvOcrServiceUrl: value.CV_OCR_SERVICE_URL,
     cvOcrDeadlineMs: value.CV_OCR_DEADLINE_MS,
     cvOcrGrpcMaxMessageBytes: value.CV_OCR_GRPC_MAX_MESSAGE_BYTES

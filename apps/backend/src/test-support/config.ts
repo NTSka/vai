@@ -20,6 +20,7 @@ export function createTestConfig(
       accessSecret: "test-access-secret",
       refreshSecret: "test-refresh-secret"
     },
+    authCookieSecure: false,
     cvOcrServiceUrl: "localhost:50051",
     cvOcrDeadlineMs: 300_000,
     cvOcrGrpcMaxMessageBytes: 512 * 1024 * 1024,
