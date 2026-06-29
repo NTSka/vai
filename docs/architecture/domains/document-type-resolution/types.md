@@ -1,7 +1,7 @@
 # Document Type Resolution Domain Types
 
-This document captures resolution of construction document family/type before
-type-specific data extraction.
+This document captures resolution of construction document family before
+family-specific data extraction.
 
 Document type resolution is separate from file technical processing. File
 technical processing determines whether a file is PDF, XLSX, or another
@@ -30,6 +30,10 @@ but are not document families. For example, `P`/project documentation and
   define it.
 - Documentation stage/package context must be represented separately from
   `TypedDocumentFamily`.
+- More specific form/kind classification belongs to the owning typed document
+  data subdomain. For example, `local_estimate`, `object_estimate`, and
+  `summary_estimate_calculation` are estimate typed-data kinds, not document
+  type resolution fields.
 
 ## Identifiers
 
@@ -67,7 +71,6 @@ interface DocumentTypeResolution {
   documentVersionId: DocumentVersionID;
 
   family: TypedDocumentFamily | "unknown" | "unsupported";
-  type?: string;
 
   documentationStage?: DocumentationStageResolution;
   packageContext?: DocumentationPackageContextResolution;
@@ -96,14 +99,13 @@ type DocumentTypeResolutionStatus =
 ```ts
 interface DocumentTypeAlternative {
   family: TypedDocumentFamily;
-  type?: string;
   confidence?: number;
 }
 ```
 
 `family` is the routing-level document family used by typed document data
-extractors. `type` is an optional more specific classifier value that can evolve
-with concrete document standards and organization-specific rules.
+extractors. Concrete document forms and subtypes are persisted by typed data
+extractors in their own payloads, not by document type resolution.
 
 ```ts
 interface DocumentationStageResolution {

@@ -73,7 +73,7 @@ async function request<T>(
     throw new ApiError({
       status: response.status,
       code: "invalid_api_response",
-      message: `Backend response for ${path} did not match the frontend contract`
+      message: `Ответ backend для ${path} не соответствует frontend-контракту`
     });
   }
 

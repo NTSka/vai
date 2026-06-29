@@ -59,14 +59,14 @@
       session.set(nextSession);
       organization = nextSession.organizations[0] ?? null;
       if (!organization) {
-        authError = "No organization membership is available for this user.";
+        authError = "Для этого пользователя не найдена организация.";
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         await goto("/login");
         return;
       }
-      authError = "Unable to load the current session.";
+      authError = "Не удалось загрузить текущую сессию.";
     } finally {
       sessionLoading.set(false);
       loadingWorkspace = false;
@@ -81,7 +81,7 @@
 
   async function submitUpload(files: FileList) {
     if (files.length === 0) {
-      uploadError = "Select at least one file.";
+      uploadError = "Выберите хотя бы один файл.";
       return;
     }
 
@@ -90,27 +90,21 @@
 
     try {
       if (!organization) {
-        uploadError = "No organization membership is available for upload.";
+        uploadError = "Для загрузки нужна организация пользователя.";
         return;
       }
       const result = await api.upload(fetch, { organizationId: organization.id, files });
       latestDocumentSetId = result.documentSetId;
       await refreshWorkspace();
-    } catch (error) {
-      uploadError =
-        error instanceof ApiError
-          ? error.message
-          : "Upload failed. The original files were not submitted.";
+    } catch {
+      uploadError = "Не удалось загрузить файлы. Проверьте формат и доступность сервера.";
     } finally {
       uploadBusy = false;
     }
   }
 
   async function refreshWorkspace(options: { quiet?: boolean } = {}) {
-    if (!organization) {
-      return;
-    }
-    if (refreshInFlight) {
+    if (!organization || refreshInFlight) {
       return;
     }
 
@@ -139,12 +133,9 @@
           await loadDocuments(nextSelectedNodeId, { quiet: options.quiet });
         }
       }
-    } catch (error) {
+    } catch {
       if (!options.quiet) {
-        documentsError =
-          error instanceof ApiError
-            ? error.message
-            : "Unable to refresh workspace state.";
+        documentsError = "Не удалось обновить состояние рабочей области.";
       }
     } finally {
       refreshInFlight = false;
@@ -171,11 +162,10 @@
         nodeId
       });
       selectedDocuments = result.documents;
-    } catch (error) {
+    } catch {
       if (!options.quiet) {
         selectedDocuments = [];
-        documentsError =
-          error instanceof ApiError ? error.message : "Unable to load documents.";
+        documentsError = "Не удалось загрузить документы.";
       }
     } finally {
       if (!options.quiet) {
@@ -186,24 +176,33 @@
 
   function getSelectedTitle(input: ProjectTree | null, nodeId: string): string {
     if (!nodeId) {
-      return "Select a node";
+      return "Выберите узел";
     }
     return (
-      input?.nodes.find((node) => node.id === nodeId)?.title ??
-      input?.fallbackGroups.find((group) => group.id === nodeId)?.title ??
-      "Select a node"
+      displayTitle(input?.nodes.find((node) => node.id === nodeId)?.title) ??
+      displayTitle(input?.fallbackGroups.find((group) => group.id === nodeId)?.title) ??
+      "Выберите узел"
     );
+  }
+
+  function displayTitle(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const labels: Record<string, string> = {
+      "Unplaced documents": "Неразмещенные документы",
+      "Unsupported documents": "Неподдерживаемые документы"
+    };
+    return labels[value] ?? value;
   }
 </script>
 
 {#if loadingWorkspace || $sessionLoading}
   <main class="grid min-h-screen place-items-center bg-panel p-6">
-    <p class="text-sm text-slate-600">Loading workspace...</p>
+    <p class="text-sm text-slate-600">Загружаем рабочую область...</p>
   </main>
 {:else if authError || !organization}
   <main class="grid min-h-screen place-items-center bg-panel p-6">
     <div class="panel max-w-md p-5">
-      <h1 class="text-lg font-semibold">Workspace unavailable</h1>
+      <h1 class="text-lg font-semibold">Рабочая область недоступна</h1>
       <p class="mt-2 text-sm text-slate-600">{authError}</p>
     </div>
   </main>

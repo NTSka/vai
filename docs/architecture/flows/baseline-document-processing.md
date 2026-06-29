@@ -57,8 +57,8 @@ User submits upload
   -> File Technical Processing detects file format
   -> File Technical Processing extracts format-level artifacts
   -> Content extracts raw or semi-structured content artifacts
-  -> Document Type Resolution resolves document family/type
-  -> Typed Document Data extracts type-specific facts
+  -> Document Type Resolution resolves document family
+  -> Typed Document Data extracts family-specific facts
   -> Document Identity resolves own/reference codes and parsed code parts
   -> Project Structure projects parsed own-code identities into nodes
   -> BaselineProcessingResult summarizes the processing outcome
@@ -179,11 +179,21 @@ roles.
 
 Document Type Resolution consumes content artifacts, source fields, title-block
 semantic evidence, and technical hints to resolve the routing-level document
-family/type.
+family.
 
 The resolved family routes the document version to typed document data
 extractors. Uncertain or unsupported resolutions must be preserved with
 confidence and alternatives where possible.
+
+Concrete form/kind classification belongs to typed document data subdomains.
+For example, Document Type Resolution routes an XLSX estimate as `estimate`;
+Estimate Data then determines whether it is a local estimate, object estimate,
+or summary estimate calculation.
+
+For XLSX files, Document Type Resolution should run after XLSX cell extraction
+so it can use supported estimate templates as routing evidence. The resolver
+may use template matches to decide `family = estimate`, but the authoritative
+estimate kind remains owned by Estimate Data.
 
 For PDF files with a successful content probe, document type resolution should
 run after title-block interpretation, not after full OCR/table extraction. If
@@ -237,13 +247,14 @@ Document Identity consumes typed document data and resolves:
 - parse status and confidence.
 
 Own-code identities are placement inputs for Project Structure. Reference-code
-identities describe relationships and matching hints, but do not place the
-source document by themselves.
+identities describe relationships and matching hints. They do not place the
+source document by themselves unless a family-specific placement rule promotes
+them, as the MVP estimate rule does for estimate basis references.
 
 ### Project Structure
 
-Project Structure consumes parsed own-code document identities and creates or
-updates:
+Project Structure consumes placement identities selected by the identity
+resolution step and creates or updates:
 
 - stable project structure nodes;
 - document placements;
@@ -252,6 +263,12 @@ updates:
 Project structure is a projection/read model. It should be updated
 incrementally as document identities are resolved so users can see the structure
 appear during processing.
+
+The read model separates hierarchy from filters. Tree nodes represent project,
+site, object, package, or other placement hierarchy. When the user selects a
+node, the UI receives the document group for that node's subtree and filters it
+by facets such as stage, section, mark, document family, document type, and
+placement status.
 
 ## Progress Model
 

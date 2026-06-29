@@ -45,6 +45,17 @@ describe("buildProjectTreeRows", () => {
 
     expect(rows.map((row) => row.id)).toEqual(["root", "a", "a-1"]);
   });
+
+  test("search matches the full dotted key chain", () => {
+    const rows = buildProjectTreeRows({
+      tree,
+      expanded: new Set(),
+      search: "P.A.A1"
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["root", "a", "a-1"]);
+    expect(rows.find((row) => row.id === "a-1")?.pathCode).toBe("P.A.A1");
+  });
 });
 
 function node(input: {

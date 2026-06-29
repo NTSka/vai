@@ -16,12 +16,12 @@
       <p class="truncate text-xs text-slate-600">{user?.email ?? ""}</p>
     </div>
     <div class="flex items-center gap-2">
-      <button class="icon-button" title="Refresh" on:click={() => onRefresh()}>
+      <button class="icon-button" title="Обновить" on:click={() => onRefresh()}>
         <RefreshCw size={16} aria-hidden="true" />
       </button>
       <button class="text-button" on:click={() => onLogout()}>
         <LogOut size={16} aria-hidden="true" />
-        Sign out
+        Выйти
       </button>
     </div>
   </div>

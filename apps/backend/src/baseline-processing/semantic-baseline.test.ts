@@ -39,7 +39,7 @@ describe("semantic baseline", () => {
         sourceTypedDataRecordIds: ["drawing-typed-record"],
         parsedParts: expect.objectContaining({
           projectCode: "PRJ",
-          stage: "R",
+          stage: "Р",
           mark: "AR"
         })
       })
@@ -172,7 +172,7 @@ describe("semantic baseline", () => {
 
     expect(typedData).toMatchObject({
       packageContext: {
-        stage: expect.objectContaining({ value: "P" }),
+        stage: expect.objectContaining({ value: "П" }),
         sectionNumber: expect.objectContaining({ value: "05" }),
         volumeNumber: expect.objectContaining({ value: "2" })
       },
@@ -182,7 +182,7 @@ describe("semantic baseline", () => {
       role: "own_code",
       parsedParts: {
         projectCode: "PRJ",
-        stage: "P",
+        stage: "П",
         sectionNumber: "05",
         volumeNumber: "2"
       }
@@ -190,7 +190,7 @@ describe("semantic baseline", () => {
     expect(identities[0]?.parsedParts["mark"]).toBeUndefined();
   });
 
-  it("extracts estimate basis codes as references without own-code placement input", () => {
+  it("extracts estimate basis codes as reference placement inputs", () => {
     const typedData = buildTypedDataPayload({
       family: "estimate",
       originalName: "estimate.xlsx",
@@ -315,9 +315,33 @@ describe("semantic baseline", () => {
       }
     });
     expect(parseSupportedGostCode("001-R-AR")).toMatchObject({
-      status: "invalid",
+      status: "parsed",
       parts: {
-        warnings: [expect.objectContaining({ code: "project_code_invalid" })]
+        projectCode: "001",
+        stage: "Р",
+        mark: "AR"
+      }
+    });
+  });
+
+  it("parses numeric project codes, Cyrillic stages, and organization-defined physical parts", () => {
+    expect(
+      parseSupportedGostCode("0471-022-П-12/1-0003-КС-009-4512-016-3-КМ")
+    ).toMatchObject({
+      status: "parsed",
+      parts: {
+        projectCode: "0471",
+        siteCode: "022",
+        stage: "П",
+        sectionNumber: "12/1",
+        volumeNumber: "0003",
+        documentGroup: "КС",
+        documentNumber: "009",
+        workCode: "4512",
+        subobjectCode: "016",
+        partNumber: "3",
+        mark: "КМ",
+        segments: ["0471", "022", "П", "12/1", "0003", "КС", "009", "4512", "016", "3", "КМ"]
       }
     });
   });

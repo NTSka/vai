@@ -35,9 +35,9 @@
     <div class="mb-3 flex items-center justify-between">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-ink">
         <FolderTree size={17} aria-hidden="true" />
-        Project structure
+        Структура проекта
       </h2>
-      <span class="text-xs text-slate-600">{rows.length} nodes</span>
+      <span class="text-xs text-slate-600">{rows.length} узлов</span>
     </div>
     <label class="relative block">
       <Search
@@ -45,14 +45,18 @@
         class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
         aria-hidden="true"
       />
-      <input class="field pl-9" placeholder="Search title or code" bind:value={search} />
+      <input
+        class="field pl-9"
+        placeholder="Поиск по названию или цепочке кода"
+        bind:value={search}
+      />
     </label>
   </div>
 
   <div class="min-h-0 flex-1 overflow-auto p-2">
     {#if rows.length === 0}
       <div class="p-6 text-sm text-slate-600">
-        {tree ? "No project nodes yet." : "Tree is not loaded yet."}
+        {tree ? "Узлы проекта пока не найдены." : "Дерево еще не загружено."}
       </div>
     {:else}
       {#each rows as row (row.id)}
@@ -60,7 +64,7 @@
           <button
             class="icon-button h-8 w-8 border-transparent bg-transparent"
             disabled={row.fallback || !row.hasChildren}
-            title={expanded.has(row.id) ? "Collapse" : "Expand"}
+            title={expanded.has(row.id) ? "Свернуть" : "Развернуть"}
             on:click={() => toggleNode(row.id)}
           >
             {#if !row.fallback && row.hasChildren}

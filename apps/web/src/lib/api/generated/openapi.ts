@@ -755,6 +755,19 @@ export interface paths {
                                     family: "estimate" | "drawing" | "statement" | "unsupported" | "unknown";
                                     confidence: string;
                                 } | (null);
+                                facets: {
+                                    family: string | (null);
+                                    stage: string | (null);
+                                    section: string | (null);
+                                    mark: string | (null);
+                                    documentGroup: string | (null);
+                                    documentType: string | (null);
+                                    estimateKind: string | (null);
+                                    sourceTemplate: string | (null);
+                                    identityRole: ("own_code" | "reference_code") | (null);
+                                    parseStatus: ("parsed" | "invalid" | "missing" | "unsupported") | (null);
+                                    placedByCode: string | (null);
+                                };
                             }[];
                         };
                     };

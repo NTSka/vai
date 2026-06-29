@@ -812,6 +812,56 @@ describe("Phase 3 repositories", () => {
     expect(updatedPlacement.status).toBe("ambiguous");
   });
 
+  dbIt("groups documents by selected project node subtree", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createRegisteredDocumentContext(database);
+    const projectStructure = createProjectStructureRepository(database);
+    const identityId = randomUUID();
+    const projectNode = await projectStructure.findOrCreateNode({
+      organizationId: context.organization.id,
+      kind: "project",
+      key: "PRJ",
+      title: "PRJ",
+      subject: "project",
+      sourceIdentityIds: [identityId]
+    });
+    const markNode = await projectStructure.findOrCreateNode({
+      organizationId: context.organization.id,
+      kind: "mark",
+      key: "KM",
+      title: "KM",
+      subject: "discipline_or_mark",
+      parentId: projectNode.id,
+      sourceIdentityIds: [identityId]
+    });
+    await projectStructure.createOrUpdatePlacement({
+      organizationId: context.organization.id,
+      documentId: context.document.id,
+      documentVersionId: context.version.id,
+      placedByIdentityId: identityId,
+      nodeId: markNode.id,
+      status: "placed"
+    });
+
+    const tree = await projectStructure.listOrganizationTree({
+      organizationId: context.organization.id
+    });
+    const projectDocuments = await projectStructure.listDocumentsForNode({
+      organizationId: context.organization.id,
+      nodeId: projectNode.id
+    });
+
+    expect(tree.nodes.find((node) => node.id === projectNode.id)?.documentCount).toBe(1);
+    expect(projectDocuments).toEqual([
+      expect.objectContaining({
+        documentVersionId: context.version.id,
+        placementStatus: "placed"
+      })
+    ]);
+  });
+
   dbIt("rejects project placements across organizations", async () => {
     const database = getDatabase();
     if (!database) return;
@@ -894,7 +944,9 @@ describe("Phase 7 baseline processing skeleton", () => {
       "document_registration",
       "file_format_detection",
       "file_technical_placeholder",
-      "content_placeholder",
+      "content_probe",
+      "xlsx_cell_extraction",
+      "gost_title_block_interpretation",
       "document_type_resolution",
       "typed_data_extraction",
       "document_identity_resolution",
@@ -1065,14 +1117,15 @@ describe("Phase 7 baseline processing skeleton", () => {
       (artifact) => artifact.artifactType === "pdf_rendered_pages"
     );
     const layout = artifacts.find((artifact) => artifact.artifactType === "pdf_layout");
-    const ocrCandidates = artifacts.find(
-      (artifact) => artifact.artifactType === "pdf_ocr_candidates"
+    const stampOcrCandidates = artifacts.find(
+      (artifact) => artifact.artifactType === "pdf_stamp_ocr_candidates"
     );
-    const ocrText = artifacts.find((artifact) => artifact.artifactType === "pdf_ocr_text");
+    const stampOcrText = artifacts.find(
+      (artifact) => artifact.artifactType === "pdf_stamp_ocr_text"
+    );
     const stampSourceFields = artifacts.find(
       (artifact) => artifact.artifactType === "pdf_stamp_source_fields"
     );
-    const tables = artifacts.find((artifact) => artifact.artifactType === "pdf_tables");
     const [titleBlock] = await database
       .select()
       .from(schema.titleBlockInterpretations)
@@ -1100,14 +1153,13 @@ describe("Phase 7 baseline processing skeleton", () => {
       format: "pdf",
       regions: [expect.objectContaining({ localId: "layout-region-1" })]
     });
-    expect(ocrCandidates?.payload).toMatchObject({
+    expect(stampOcrCandidates?.payload).toMatchObject({
       format: "pdf",
       candidates: [
-        expect.objectContaining({ localId: "ocr-candidate-stamp-designation" }),
-        expect.objectContaining({ localId: "ocr-candidate-1" })
+        expect.objectContaining({ localId: "ocr-candidate-stamp-designation" })
       ]
     });
-    expect(ocrText?.payload).toMatchObject({
+    expect(stampOcrText?.payload).toMatchObject({
       format: "pdf",
       texts: [expect.objectContaining({ text: "PRJ-001-R-KJ" })]
     });
@@ -1134,15 +1186,6 @@ describe("Phase 7 baseline processing skeleton", () => {
       evidence: expect.objectContaining({
         documentDesignation: "PRJ-001-R-KJ"
       })
-    });
-    expect(tables?.payload).toMatchObject({
-      format: "pdf",
-      tables: [expect.objectContaining({ localId: "table-1" })],
-      rows: [
-        expect.objectContaining({
-          cells: [expect.objectContaining({ value: "PRJ-001-R-KJ" })]
-        })
-      ]
     });
     expect(renderProfiles).toEqual([
       { dpi: 300, imageFormat: "png", maxPagePixels: 256_000_000 }
@@ -1318,7 +1361,7 @@ describe("Phase 7 baseline processing skeleton", () => {
     const mark = nodes.find((node) => node.kind === "mark");
 
     expect(project).toMatchObject({ key: "PRJ" });
-    expect(stage).toMatchObject({ key: "R", parentId: project?.id });
+    expect(stage).toMatchObject({ key: "Р", parentId: project?.id });
     expect(mark).toMatchObject({ key: "AR", parentId: stage?.id });
     expect(placement).toMatchObject({
       status: "placed",
@@ -1417,7 +1460,7 @@ describe("Phase 7 baseline processing skeleton", () => {
     });
   });
 
-  dbIt("persists estimate reference identities without using them for placement", async () => {
+  dbIt("places estimates by basis reference identity", async () => {
     const database = getDatabase();
     if (!database) return;
 
@@ -1455,6 +1498,10 @@ describe("Phase 7 baseline processing skeleton", () => {
       .select()
       .from(schema.projectStructurePlacements)
       .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const [summary] = await database
+      .select()
+      .from(schema.baselineProcessingResults)
+      .where(eq(schema.baselineProcessingResults.documentSetId, context.documentSet.id));
     const ownIdentity = identities.find((identity) => identity.role === "own_code");
     const referenceIdentity = identities.find(
       (identity) => identity.role === "reference_code"
@@ -1489,8 +1536,12 @@ describe("Phase 7 baseline processing skeleton", () => {
       ])
     );
     expect(placement).toMatchObject({
-      status: "unplaced",
-      placedByIdentityId: ownIdentity?.id
+      status: "placed",
+      placedByIdentityId: referenceIdentity?.id
+    });
+    expect(summary).toMatchObject({
+      status: "completed",
+      warnings: []
     });
   });
 
@@ -1641,6 +1692,15 @@ describe("Phase 8 backend read APIs", () => {
           typeResolution: {
             family: "drawing",
             confidence: "placeholder"
+          },
+          facets: {
+            family: "drawing",
+            stage: null,
+            mark: null,
+            documentType: null,
+            identityRole: "own_code",
+            parseStatus: "parsed",
+            placedByCode: "PRJ-001"
           }
         }
       ]

@@ -222,8 +222,8 @@ tasks while preserving the original task as an epic/container.
 | MVP-1205 | Implement GOST/document-code parser. | MVP-1202, MVP-1203, MVP-1204 | Parser for supported standard. | Fixture tests cover valid, invalid, missing, unsupported-standard, own-code, and reference-code examples from estimates, drawings, and statements/registers. |
 | MVP-1206 | Implement document identity resolver. | MVP-1205 | `DocumentIdentity` records. | Resolver creates own/reference identities from typed data source fields and preserves source typed record ids. |
 | MVP-1207 | Implement GOST node path rules. | MVP-1205, MVP-0309 | Standard-specific project node creation. | Parsed own-code identities create stable nodes for supported code levels. Optional missing parts are handled by standard rules. |
-| MVP-1208 | Implement target-node selection rules. | MVP-1207 | Placement target per document family. | Drawing, estimate, and standalone statement fixtures attach to expected node levels when they have explicit own-code placement inputs. Embedded statement rows do not place the source drawing by themselves. |
-| MVP-1209 | Implement placement status outcomes. | MVP-1208 | Placed, ambiguous, and unplaced placement records. | Missing/invalid/unsupported own-code creates unplaced placement. Multiple valid targets create ambiguous placement. |
+| MVP-1208 | Implement target-node selection rules. | MVP-1207 | Placement target per document family. | Drawing and standalone statement fixtures attach to expected node levels when they have explicit own-code placement inputs. Estimate fixtures may attach by own code or by promoted basis reference. Embedded statement rows do not place the source drawing by themselves. |
+| MVP-1209 | Implement placement status outcomes. | MVP-1208 | Placed, ambiguous, and unplaced placement records. | Missing/invalid/unsupported own-code creates unplaced placement unless a family-specific rule promotes another identity. Multiple valid targets create ambiguous placement. |
 
 ### Phase 13 Tasks: Baseline Hardening
 

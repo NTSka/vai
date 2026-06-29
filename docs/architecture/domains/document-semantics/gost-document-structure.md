@@ -103,15 +103,43 @@ MVP classification rules:
   invalid, the extractor should produce an explicit warning and an invalid or
   missing identity outcome instead of failing the job by default.
 
-- raw Cyrillic P-stage, Latin `P`, or clear project-documentation context ->
-  normalized `P`;
-- raw Cyrillic R-stage, Latin `R`, or clear working-documentation context ->
-  normalized `R`;
-- raw Cyrillic I-stage or Latin `I` -> normalized `I`;
+- raw Cyrillic `П`, Latin `P`, or clear project-documentation context ->
+  normalized `П`;
+- raw Cyrillic `Р`, Latin `R`, or clear working-documentation context ->
+  normalized `Р`;
+- raw Cyrillic `И`, Latin `I`, or Cyrillic `ИИ` -> normalized `И` or `ИИ`;
 - source labels such as `PD` and `RD` stay available as raw values, but parsed
-  identity parts use `P` or `R`.
-- source labels such as `PD` and `RD` stay available as raw values, but parsed
-  identity parts use `P` or `R`.
+  identity parts use Cyrillic stage values such as `П` or `Р`.
+
+## Document Code Parsing
+
+The MVP parser accepts code segments separated by dash, dot, or whitespace.
+Project codes may be numeric or alphanumeric. Documentation stage segments may
+be Latin or Cyrillic, but parsed identity parts store the canonical Cyrillic
+stage.
+
+For the organization-defined estimate/reference code shape currently supported
+by the MVP, the parser treats the following physical hierarchy as meaningful:
+
+```text
+projectCode-siteCode-stage-sectionNumber-volumeNumber-documentGroup-documentNumber-workCode-subobjectCode-partNumber-mark
+```
+
+Example:
+
+```text
+0471-022-П-12/1-0003-КС-009-4512-016-3-КМ
+```
+
+This produces `projectCode = 0471`, `siteCode = 022`, `stage = П`,
+`sectionNumber = 12/1`, `volumeNumber = 0003`, `documentGroup = КС`,
+`documentNumber = 009`, `workCode = 4512`, `subobjectCode = 016`,
+`partNumber = 3`, and `mark = КМ`.
+
+The physical hierarchy rule is only applied when the parser can see a numeric
+project segment followed by a numeric site segment before a recognized stage.
+Codes that do not match that shape remain on the older documentation
+stage/section/mark fallback path.
 
 ## Estimate Documentation
 
@@ -133,9 +161,8 @@ MVP classification rules:
 - Estimate files are typed as `estimate` even when they are XLSX workbooks
   rather than PDFs.
 - Estimate basis/reference fields produce `reference_code` identities.
-- A reference code from an estimate must not place the estimate document by
-  itself. Placement requires an own code or a later explicit placement rule for
-  estimate packages.
+- The MVP estimate placement rule may promote an estimate basis/reference code
+  to place the estimate document.
 - Estimate extraction must keep source cell/table references where available so
   later RD-estimate comparison can explain where a value came from.
 
@@ -256,7 +283,7 @@ Initial main-inscription field mapping:
 | 3 | `buildingOrStructureName` | Building/structure name and, where applicable, work type such as reconstruction, overhaul, demolition, or technical re-equipment. |
 | 4 | `sheetTitle` | Name of images on the sheet or document name for applicable forms. For general data sheets, often "General data". |
 | 5 | `productOrDocumentName` | Product name and/or document name for forms where field 5 is used. |
-| 6 | `documentationStage` | Conditional documentation stage, normalized to `P`, `R`, or `I`. This is a routing signal, not a complete document type. |
+| 6 | `documentationStage` | Conditional documentation stage, normalized to `П`, `Р`, `И`, or `ИИ`. This is a routing signal, not a complete document type. |
 | 7 | `sheetNumber` | Sequential sheet number. Empty for single-sheet documents. |
 | 8 | `sheetCount` | Total sheet count. Usually filled on the first sheet only. |
 | 9 | `developerOrganization` | Name or index of the organization that prepared the document. |
@@ -617,9 +644,9 @@ Initial placement assumptions:
 - Project-documentation packages attach to project, documentation-section,
   documentation-subsection, or documentation-volume nodes when a supported
   project/section identity and package context are available.
-- Estimates attach only through an explicit own-code placement rule. Estimate
-  reference codes are relationship inputs for comparison and review, not source
-  document placement.
+- Estimates attach through basis reference codes when they are available. An
+  explicit own-code placement rule remains a fallback for estimates without a
+  usable basis.
 - Standalone statements attach only through an explicit own-code placement rule.
   Register rows create relationship hints and completeness inputs, not source
   document placements by themselves.

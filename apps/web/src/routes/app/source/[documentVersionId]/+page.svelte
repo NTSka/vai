@@ -71,7 +71,7 @@
       session.set(loadedSession);
       const org = loadedSession.organizations[0];
       if (!org) {
-        errorMessage = "No organization membership is available for this user.";
+        errorMessage = "Для этого пользователя не найдена организация.";
         return;
       }
       const [nextMetadata, nextViewer] = await Promise.all([
@@ -91,8 +91,7 @@
         await goto("/login");
         return;
       }
-      errorMessage =
-        error instanceof ApiError ? error.message : "Unable to load source document.";
+      errorMessage = "Не удалось загрузить исходный документ.";
     } finally {
       loading = false;
     }
@@ -258,6 +257,29 @@
   function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
   }
+
+  function statusLabel(value: string): string {
+    const labels: Record<string, string> = {
+      ready: "Готов",
+      processing: "Обработка",
+      failed: "Ошибка",
+      unsupported: "Не поддерживается"
+    };
+    return labels[value] ?? value;
+  }
+
+  function byteLabel(value: number): string {
+    return new Intl.NumberFormat("ru-RU").format(value);
+  }
+
+  function viewerReasonLabel(value: string): string {
+    const labels: Record<string, string> = {
+      unsupported_format: "Для этого формата пока нет предпросмотра.",
+      content_not_available: "Содержимое для предпросмотра пока недоступно.",
+      source_file_not_found: "Исходный файл не найден."
+    };
+    return labels[value] ?? "Предпросмотр для этого документа недоступен.";
+  }
 </script>
 
 <main class="min-h-screen bg-panel">
@@ -265,11 +287,11 @@
     <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
       <button class="text-button" on:click={() => goto("/app")}>
         <ArrowLeft size={16} aria-hidden="true" />
-        Back
+        Назад
       </button>
       <div class="min-w-0 text-right">
         <div class="truncate text-sm font-semibold text-ink">
-          {organization?.name ?? "Workspace"}
+          {organization?.name ?? "Рабочая область"}
         </div>
       </div>
     </div>
@@ -277,10 +299,10 @@
 
   <section class="mx-auto max-w-7xl px-4 py-4">
     {#if loading}
-      <p class="text-sm text-slate-600">Loading source document...</p>
+      <p class="text-sm text-slate-600">Загружаем исходный документ...</p>
     {:else if errorMessage}
       <div class="panel p-5">
-        <h1 class="text-lg font-semibold text-ink">Source unavailable</h1>
+        <h1 class="text-lg font-semibold text-ink">Источник недоступен</h1>
         <p class="mt-2 text-sm text-slate-600">{errorMessage}</p>
       </div>
     {:else if metadata && viewer}
@@ -295,18 +317,18 @@
             <span class="truncate">{metadata.sourceFile.originalName}</span>
           </h1>
           <div class="mt-2 flex flex-wrap gap-2 text-xs">
-            <span class="border border-line bg-white px-2 py-1">{metadata.status}</span>
+            <span class="border border-line bg-white px-2 py-1">{statusLabel(metadata.status)}</span>
             <span class="border border-line bg-white px-2 py-1">
-              {metadata.sourceFile.mimeType ?? "unknown"}
+              {metadata.sourceFile.mimeType ?? "тип неизвестен"}
             </span>
             <span class="border border-line bg-white px-2 py-1">
-              {metadata.sourceFile.sizeBytes} bytes
+              {byteLabel(metadata.sourceFile.sizeBytes)} байт
             </span>
           </div>
         </div>
         <a class="primary-button shrink-0 justify-center" href={viewer.downloadUrl}>
           <Download size={16} aria-hidden="true" />
-          Download
+          Скачать
         </a>
       </div>
 
@@ -318,19 +340,19 @@
               PDF
             </div>
             <div class="flex flex-wrap items-center gap-2">
-              <button class="icon-button" title="Pan with mouse drag" aria-label="Pan with mouse drag">
+              <button class="icon-button" title="Перемещение мышью" aria-label="Перемещение мышью">
                 <Move size={16} aria-hidden="true" />
               </button>
-              <button class="icon-button" title="Zoom out" aria-label="Zoom out" on:click={() => zoomPdf(-0.1)}>
+              <button class="icon-button" title="Уменьшить" aria-label="Уменьшить" on:click={() => zoomPdf(-0.1)}>
                 <Minus size={16} aria-hidden="true" />
               </button>
               <span class="w-14 text-center text-xs text-slate-600">{Math.round(pdfZoom * 100)}%</span>
-              <button class="icon-button" title="Zoom in" aria-label="Zoom in" on:click={() => zoomPdf(0.1)}>
+              <button class="icon-button" title="Увеличить" aria-label="Увеличить" on:click={() => zoomPdf(0.1)}>
                 <Plus size={16} aria-hidden="true" />
               </button>
               <button class="text-button" on:click={fitPdfWidth}>
                 <Maximize2 size={16} aria-hidden="true" />
-                Fit width
+                По ширине
               </button>
             </div>
           </div>
@@ -339,7 +361,7 @@
             class:panning={isPanning}
             class="pdf-viewport h-[calc(100vh-220px)] overflow-auto bg-slate-100 p-6"
             role="region"
-            aria-label="PDF page viewport"
+            aria-label="Просмотр страниц PDF"
             on:wheel={handlePdfWheel}
             on:pointerdown={startPan}
             on:pointermove={movePan}
@@ -350,13 +372,13 @@
               {#each viewer.pages as pdfPage (pdfPage.pageNumber)}
                 <article class="overflow-hidden border border-line bg-white shadow-sm">
                   <div class="flex items-center justify-between border-b border-line px-3 py-2">
-                    <div class="text-sm font-semibold text-ink">Page {pdfPage.pageNumber}</div>
-                    <span class="text-xs text-slate-600">{pdfPage.widthPx} x {pdfPage.heightPx}px</span>
+                    <div class="text-sm font-semibold text-ink">Страница {pdfPage.pageNumber}</div>
+                    <span class="text-xs text-slate-600">{pdfPage.widthPx} × {pdfPage.heightPx} пикс.</span>
                   </div>
                   <img
                     class="block select-none"
                     src={pdfPage.imageUrl}
-                    alt={`Rendered page ${pdfPage.pageNumber}`}
+                    alt={`Отрисованная страница ${pdfPage.pageNumber}`}
                     draggable="false"
                     style={`width: ${Math.round(pdfPage.widthPx * pdfZoom)}px; height: ${Math.round(pdfPage.heightPx * pdfZoom)}px;`}
                   />
@@ -419,14 +441,14 @@
                 </tbody>
               </table>
             {:else}
-              <p class="p-4 text-sm text-slate-600">No extracted cells are available for this sheet.</p>
+              <p class="p-4 text-sm text-slate-600">Для этого листа нет извлеченных ячеек.</p>
             {/if}
           </div>
         </section>
       {:else}
         <div class="panel p-5">
-          <h2 class="text-base font-semibold text-ink">Preview unavailable</h2>
-          <p class="mt-2 text-sm text-slate-600">{viewer.reason}</p>
+          <h2 class="text-base font-semibold text-ink">Предпросмотр недоступен</h2>
+          <p class="mt-2 text-sm text-slate-600">{viewerReasonLabel(viewer.reason)}</p>
         </div>
       {/if}
     {/if}

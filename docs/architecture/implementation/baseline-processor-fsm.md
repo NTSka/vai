@@ -497,7 +497,7 @@ FSM:
 pending
   -> queued
   -> running
-  -> completed: document family/type resolution is persisted
+  -> completed: document family resolution is persisted
   -> failed: resolver cannot produce a resolution record
 ```
 
@@ -506,6 +506,12 @@ Output facts:
 - `DocumentTypeResolution`;
 - confidence and alternatives;
 - `document_type.resolved` event.
+
+The resolver persists the routing family only. More specific form/kind
+classification is owned by typed data extractors, such as Estimate Data for
+`local_estimate`, `object_estimate`, and `summary_estimate_calculation`.
+For XLSX files, the resolver should use cell artifacts and supported typed-data
+template matches as evidence before routing to `estimate`.
 
 Uncertain, unknown, and unsupported resolutions should be successful domain
 outputs when the resolver can classify that state. They should not be modeled

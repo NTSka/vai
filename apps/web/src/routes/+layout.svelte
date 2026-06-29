@@ -6,7 +6,7 @@
   <title>VAI 2.0</title>
   <meta
     name="description"
-    content="Document intake and baseline project structure navigation."
+    content="Приемка документов и навигация по базовой структуре проекта."
   />
 </svelte:head>
 

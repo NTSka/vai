@@ -102,7 +102,9 @@ family.
 
 ## Placement Rules
 
-Project Structure consumes parsed `own_code` identities only.
+Project Structure consumes parsed `own_code` identities by default. Estimate
+documents use `reference_code` identities extracted from the estimate basis
+field as placement inputs when such references are available.
 
 For working-documentation drawing-like codes:
 
@@ -118,7 +120,8 @@ project -> documentation_section -> documentation_subsection -> documentation_vo
 
 Missing optional parts are skipped. Missing, invalid, unsupported, and
 reference-only outcomes produce unplaced placements with warnings through the
-baseline summary path. Parsed own-code identities with incomplete placement
+baseline summary path unless a document-family placement rule explicitly
+promotes a reference identity. Parsed identities with incomplete placement
 context produce `ambiguous` placements.
 
 ## Test Coverage
@@ -129,7 +132,7 @@ The implementation includes unit coverage for:
 - drawing own-code extraction and parsed GOST parts;
 - content-artifact code candidates;
 - project-documentation package context;
-- estimate reference-only identities;
+- estimate basis reference identities;
 - statement own and row reference identities;
 - embedded statement/register rows inside drawing documents;
 - standalone statement rows not being promoted to source own identity;
@@ -140,7 +143,7 @@ Repository integration coverage exists for:
 - RD drawing placement under project/stage/mark;
 - PD package placement under section/volume;
 - ambiguous placement for parsed mark without stage;
-- estimate reference identities not placing the source document.
+- estimate placement by basis reference identity.
 - standalone statement row references not placing the source document.
 
 The integration tests require `TEST_DATABASE_URL`.

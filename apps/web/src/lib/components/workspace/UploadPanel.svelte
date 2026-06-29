@@ -17,13 +17,28 @@
     await onSubmit(files);
     files = null;
   }
+
+  function statusLabel(value: string): string {
+    const labels: Record<string, string> = {
+      uploaded: "Загружен",
+      intake_processing: "Приемка",
+      accepted: "Принят",
+      failed: "Ошибка",
+      pending: "Ожидает",
+      not_started: "Не начата",
+      processing: "Обработка",
+      completed: "Завершена",
+      completed_with_warnings: "Завершена с предупреждениями"
+    };
+    return labels[value] ?? value;
+  }
 </script>
 
 <form class="panel p-4" on:submit|preventDefault={submit}>
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h2 class="text-sm font-semibold text-ink">Upload</h2>
-      <p class="text-xs text-slate-600">Original files are preserved by backend intake.</p>
+      <h2 class="text-sm font-semibold text-ink">Загрузка</h2>
+      <p class="text-xs text-slate-600">Исходные файлы сохраняются без перезаписи.</p>
     </div>
     <Upload size={18} class="text-accent" aria-hidden="true" />
   </div>
@@ -37,7 +52,7 @@
     }}
   />
   <button class="primary-button mt-3 w-full justify-center" disabled={busy}>
-    {busy ? "Uploading" : "Upload files"}
+    {busy ? "Загружаем" : "Загрузить файлы"}
   </button>
 
   {#if error}
@@ -48,12 +63,12 @@
 
   {#if documentSetStatus}
     <div class="mt-3 border border-line bg-panel p-3 text-xs text-slate-700">
-      <div class="font-semibold text-ink">Latest document set</div>
+      <div class="font-semibold text-ink">Последний комплект документов</div>
       <div class="mt-1 grid grid-cols-2 gap-1">
-        <span>Intake</span>
-        <span class="text-right">{documentSetStatus.intakeStatus}</span>
-        <span>Baseline</span>
-        <span class="text-right">{documentSetStatus.baselineStatus}</span>
+        <span>Приемка</span>
+        <span class="text-right">{statusLabel(documentSetStatus.intakeStatus)}</span>
+        <span>Базовая обработка</span>
+        <span class="text-right">{statusLabel(documentSetStatus.baselineStatus)}</span>
       </div>
     </div>
   {/if}

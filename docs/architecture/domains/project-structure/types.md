@@ -209,6 +209,22 @@ package" or "this node has related documents". The domain still models this as
 one node with many placements instead of one node per upload, because uploads are
 intake facts and should not define the project hierarchy.
 
+Selecting a node returns a document group for that node and its descendants.
+The group is filtered by document facets instead of turning every facet into a
+tree level. The tree should represent the physical or organizational project
+structure when the parsed code contains physical hierarchy levels. Facets
+represent cross-cutting documentation dimensions.
+
+Initial document-group facets:
+
+- stage;
+- section or section part;
+- mark;
+- document group/type;
+- estimate kind;
+- document family;
+- placement and identity parse status.
+
 ## Placement Rules
 
 Initial placement uses only parsed `own_code` identities.
@@ -218,20 +234,39 @@ estimate assumptions in
 [`../document-semantics/gost-document-structure.md`](../document-semantics/gost-document-structure.md)
 as the standard-specific placement reference.
 
-The initial node path is derived from `DocumentCodeParts`:
+The initial node path is derived from `DocumentCodeParts`. When the supported
+parser recognizes physical hierarchy parts, the tree path is:
 
 ```text
 projectCode
-  -> complexKind
-  -> complexPartKind
-  -> complexPartNumber
-  -> buildingNumber
+  -> siteCode
+  -> workCode
+  -> subobjectCode
+```
+
+For example, `0471-022-П-12/1-0003-КС-009-4512-016-3-КМ` is placed under:
+
+```text
+0471
+  -> Площадка 022
+  -> Объект/работа 4512
+  -> Подобъект 016
+```
+
+The documentation values from that same code, such as `stage = П`,
+`sectionNumber = 12/1`, `documentGroup = КС`, and `mark = КМ`, are exposed as
+document facets for filtering inside the selected node group.
+
+When physical hierarchy parts are not recognized, the fallback path uses
+documentation/package parts:
+
+```text
+projectCode
   -> documentation_section
   -> documentation_subsection
   -> documentation_volume
   -> stage
   -> mark
-  -> document_group
 ```
 
 Missing optional parts are skipped unless the applicable standard or
@@ -254,9 +289,9 @@ Initial target-node assumptions:
   `documentation_section`, `documentation_subsection`, or
   `documentation_volume` nodes when their own identity and package context are
   parsed.
-- Estimates attach only through explicit own-code placement rules. Estimate
-  reference codes are relationship inputs and must not place the estimate
-  source document by themselves.
+- Estimates attach through estimate basis `reference_code` identities when they
+  are available. An explicit own-code placement rule remains a fallback for
+  estimates without a usable basis.
 
 ## Relationship Inputs
 
@@ -265,7 +300,8 @@ structure branches. They are useful for cross-document matching, comparison, and
 review workflows.
 
 They should not place the source document version into the tree unless a
-separate domain rule explicitly promotes a reference to a placement.
+separate domain rule explicitly promotes a reference to a placement. The MVP
+estimate rule promotes basis references for estimate documents.
 
 ## Out of Scope
 

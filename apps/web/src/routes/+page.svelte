@@ -18,5 +18,5 @@
 </script>
 
 <main class="flex min-h-screen items-center justify-center bg-panel p-6">
-  <p class="text-sm text-slate-600">Loading workspace...</p>
+  <p class="text-sm text-slate-600">Загружаем рабочую область...</p>
 </main>

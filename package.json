@@ -5,6 +5,8 @@
   "packageManager": "pnpm@10.18.2",
   "scripts": {
     "dev": "pnpm -r --if-present dev",
+    "worker:dev": "pnpm --filter @vai/backend worker:dev",
+    "worker:once": "pnpm --filter @vai/backend worker:once",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test && pnpm test:db",

@@ -100,6 +100,29 @@ estimate in the project-documentation stage, an estimate in the
 working-documentation stage, a drawing in the working-documentation stage, or a
 statement/register table in the working-documentation stage.
 
+Estimate form kinds are below the `estimate` family. They must not be promoted
+to `TypedDocumentFamily` values because local estimates, object estimates, and
+summary estimate calculations are all estimate typed data with different
+payload schemas.
+
+```ts
+type EstimateKind =
+  | "local_estimate"
+  | "local_estimate_calculation"
+  | "object_estimate"
+  | "summary_estimate_calculation"
+  | "resource_statement"
+  | "unknown";
+```
+
+```ts
+type EstimateMethod =
+  | "basis_index"
+  | "resource_index"
+  | "resource"
+  | "unknown";
+```
+
 ```ts
 type DocumentationStage =
   | "P"
@@ -288,6 +311,27 @@ project placement; concrete extractors still own their output schemas.
 
 Interprets XLSX/PDF estimate content into estimate-specific facts.
 
+Estimate Data is a typed document data subdomain under the `estimate` family.
+It owns estimate-kind classification and dispatches to concrete form modules.
+The first concrete module is Local Estimate / Local Estimate Calculation.
+Supported estimate sources and layouts are registered as explicit templates in
+[`estimate-templates.md`](./estimate-templates.md).
+
+```text
+Typed Document Data
+  -> Estimate Data
+     -> Local Estimate / Local Estimate Calculation
+     -> Resource Statement
+     -> Object Estimate
+     -> Summary Estimate Calculation
+```
+
+`Estimate Data` should not force all estimate forms into one flat payload.
+Each form module owns its own schema and keeps the structure of the source
+document. Local estimates expose line items and sections; object and summary
+estimate calculations aggregate child estimates and objects. Resource
+statements expose resource groups and resource rows for a related estimate.
+
 Initial responsibilities:
 
 - detect basis/reference fields;
@@ -298,6 +342,109 @@ Initial responsibilities:
 - extract quantities and units;
 - preserve worksheet/row/cell or page/table/region source references;
 - preserve source content artifact links.
+
+#### Local Estimate Data
+
+Local Estimate Data interprets local estimate and local estimate calculation
+forms. It consumes content artifacts such as `xlsx_workbook`, `xlsx_cells`, PDF
+tables, and source fields, then produces a form-shaped payload.
+
+```text
+schema id: estimate.local_estimate
+family: estimate
+kind: local_estimate | local_estimate_calculation
+```
+
+```ts
+interface LocalEstimatePayload {
+  schema: { id: "estimate.local_estimate"; version: "1.0.0" };
+  standard?: AppliedDocumentStandard;
+  kind: "local_estimate" | "local_estimate_calculation";
+  method: EstimateMethod;
+  recognition: EstimateRecognition;
+  header: LocalEstimateHeader;
+  sections: LocalEstimateSection[];
+  totals?: LocalEstimateTotals;
+  signatures?: EstimateSignatureBlock;
+  warnings: TypedDataWarning[];
+}
+```
+
+```ts
+interface EstimateRecognition {
+  status: "recognized" | "ambiguous" | "unknown" | "unsupported";
+  confidence: "high" | "medium" | "low";
+  evidence: SourceReference[];
+  warnings: TypedDataWarning[];
+}
+```
+
+```ts
+interface LocalEstimateHeader {
+  estimateNumber?: TypedField<string>;
+  constructionName?: TypedField<string>;
+  objectName?: TypedField<string>;
+  workName?: TypedField<string>;
+  basis?: TypedField<string>;
+  priceLevel?: TypedField<string>;
+}
+```
+
+```ts
+interface LocalEstimateSection {
+  sectionNumber?: TypedField<string>;
+  title?: TypedField<string>;
+  items: LocalEstimateItem[];
+  totals?: LocalEstimateTotals;
+}
+```
+
+```ts
+interface LocalEstimateItem {
+  rowNumber?: number;
+  positionNumber?: TypedField<string>;
+  basisCode?: TypedField<string>;
+  name?: TypedField<string>;
+  unit?: TypedField<string>;
+  quantity?: TypedField<number>;
+  resources?: LocalEstimateResource[];
+  costs?: Record<string, TypedField<number>>;
+  source: SourceReference[];
+  warnings?: TypedDataWarning[];
+}
+```
+
+```ts
+interface LocalEstimateResource {
+  resourceCode?: TypedField<string>;
+  name?: TypedField<string>;
+  unit?: TypedField<string>;
+  quantity?: TypedField<number>;
+  cost?: TypedField<number>;
+  source: SourceReference[];
+}
+```
+
+```ts
+interface LocalEstimateTotals {
+  estimatedCost?: TypedField<number>;
+  constructionWorks?: TypedField<number>;
+  installationWorks?: TypedField<number>;
+  equipment?: TypedField<number>;
+  otherCosts?: TypedField<number>;
+  laborCost?: TypedField<number>;
+  overhead?: TypedField<number>;
+  estimatedProfit?: TypedField<number>;
+}
+```
+
+```ts
+interface EstimateSignatureBlock {
+  preparedBy?: TypedField<string>;
+  checkedBy?: TypedField<string>;
+  approvedBy?: TypedField<string>;
+}
+```
 
 ### Drawing Document Data
 

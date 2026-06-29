@@ -17,7 +17,9 @@ reference codes, normalized designations, parsed code parts, and relation hints.
 - Own-code identities are placement inputs for project structure.
 - Reference-code identities are relationship inputs. They may link a source
   document to another project branch or document, but they must not by
-  themselves place the source document into the project structure.
+  themselves place the source document into the project structure unless a
+  family-specific placement rule promotes them. The MVP estimate rule promotes
+  estimate basis references.
 - For a parsed identity, `parts.projectCode` is the top-level project key
   extracted from the beginning of the normalized code.
 

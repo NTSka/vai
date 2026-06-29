@@ -68,6 +68,21 @@ export type ProjectStructureDocumentRow = {
         readonly confidence: string;
       }
     | null;
+  readonly facets: ProjectStructureDocumentFacets;
+};
+
+export type ProjectStructureDocumentFacets = {
+  readonly family: string | null;
+  readonly stage: string | null;
+  readonly section: string | null;
+  readonly mark: string | null;
+  readonly documentGroup: string | null;
+  readonly documentType: string | null;
+  readonly estimateKind: string | null;
+  readonly sourceTemplate: string | null;
+  readonly identityRole: string | null;
+  readonly parseStatus: "parsed" | "invalid" | "missing" | "unsupported" | null;
+  readonly placedByCode: string | null;
 };
 
 export function createProjectStructureRepository(
@@ -94,6 +109,9 @@ export function createProjectStructureRepository(
         )
         .where(eq(schema.projectStructureNodes.organizationId, input.organizationId))
         .groupBy(schema.projectStructureNodes.id);
+      const descendantCounts = await listDescendantDocumentCounts(db, {
+        organizationId: input.organizationId
+      });
 
       const fallbackRows = await db.execute<{
         unplaced_count: string | number;
@@ -121,7 +139,8 @@ export function createProjectStructureRepository(
       return {
         nodes: nodeRows.map((row) => ({
           ...row.node,
-          documentCount: toNumber(row.documentCount)
+          documentCount:
+            descendantCounts.get(row.node.id) ?? toNumber(row.documentCount)
         })),
         fallbackGroups: {
           unplacedCount: toNumber(fallback.unplaced_count),
@@ -131,11 +150,14 @@ export function createProjectStructureRepository(
     },
 
     async listDocumentsForNode(input) {
+      const nodeIds = await listDescendantNodeIds(db, input);
       return listProjectDocuments(
         db,
         input,
         and(
-          eq(schema.projectStructurePlacements.nodeId, input.nodeId),
+          nodeIds.length > 0
+            ? inArray(schema.projectStructurePlacements.nodeId, nodeIds)
+            : eq(schema.projectStructurePlacements.nodeId, input.nodeId),
           inArray(schema.projectStructurePlacements.status, ["placed", "ambiguous"])
         )
       );
@@ -287,7 +309,13 @@ async function listProjectDocuments(
       status: schema.documentVersions.status,
       placementStatus: schema.projectStructurePlacements.status,
       typeFamily: schema.documentTypeResolutions.family,
-      typeConfidence: schema.documentTypeResolutions.confidence
+      typeConfidence: schema.documentTypeResolutions.confidence,
+      identityRole: schema.documentIdentities.role,
+      identityNormalizedValue: schema.documentIdentities.normalizedValue,
+      identityParseStatus: schema.documentIdentities.parseStatus,
+      identityParsedParts: schema.documentIdentities.parsedParts,
+      typedDataFamily: schema.typedDataRecords.family,
+      typedDataData: schema.typedDataRecords.data
     })
     .from(schema.documentVersions)
     .innerJoin(
@@ -323,6 +351,24 @@ async function listProjectDocuments(
         )
       )
     )
+    .leftJoin(
+      schema.documentIdentities,
+      and(
+        eq(
+          schema.documentIdentities.organizationId,
+          schema.projectStructurePlacements.organizationId
+        ),
+        eq(schema.documentIdentities.id, schema.projectStructurePlacements.placedByIdentityId)
+      )
+    )
+    .leftJoin(
+      schema.typedDataRecords,
+      and(
+        eq(schema.typedDataRecords.organizationId, schema.documentVersions.organizationId),
+        eq(schema.typedDataRecords.documentVersionId, schema.documentVersions.id),
+        eq(schema.typedDataRecords.family, schema.documentTypeResolutions.family)
+      )
+    )
     .where(
       and(eq(schema.documentVersions.organizationId, input.organizationId), condition)
     );
@@ -345,11 +391,170 @@ async function listProjectDocuments(
               family: row.typeFamily,
               confidence: row.typeConfidence
             }
-          : null
+          : null,
+      facets: buildDocumentFacets(row)
     });
   }
 
   return [...documents.values()];
+}
+
+async function listDescendantNodeIds(
+  db: Db,
+  input: {
+    readonly organizationId: string;
+    readonly nodeId: string;
+  }
+): Promise<string[]> {
+  const rows = await db.execute<{ id: string }>(sql`
+    with recursive descendants as (
+      select id
+      from project_structure_nodes
+      where organization_id = ${input.organizationId}
+        and id = ${input.nodeId}
+      union all
+      select child.id
+      from project_structure_nodes child
+      inner join descendants parent on parent.id = child.parent_id
+      where child.organization_id = ${input.organizationId}
+    )
+    select id from descendants
+  `);
+
+  return rows.rows.map((row) => row.id);
+}
+
+async function listDescendantDocumentCounts(
+  db: Db,
+  input: {
+    readonly organizationId: string;
+  }
+): Promise<ReadonlyMap<string, number>> {
+  const rows = await db.execute<{
+    node_id: string;
+    document_count: string | number;
+  }>(sql`
+    with recursive node_closure as (
+      select id as ancestor_id, id as descendant_id
+      from project_structure_nodes
+      where organization_id = ${input.organizationId}
+      union all
+      select closure.ancestor_id, child.id as descendant_id
+      from node_closure closure
+      inner join project_structure_nodes child on child.parent_id = closure.descendant_id
+      where child.organization_id = ${input.organizationId}
+    )
+    select
+      node.id as node_id,
+      count(distinct placement.document_version_id) as document_count
+    from project_structure_nodes node
+    left join node_closure closure on closure.ancestor_id = node.id
+    left join project_structure_placements placement
+      on placement.organization_id = node.organization_id
+      and placement.node_id = closure.descendant_id
+      and placement.status in ('placed', 'ambiguous')
+    where node.organization_id = ${input.organizationId}
+    group by node.id
+  `);
+
+  return new Map(rows.rows.map((row) => [row.node_id, toNumber(row.document_count)]));
+}
+
+function buildDocumentFacets(row: {
+  readonly typeFamily: typeof schema.documentTypeFamily.enumValues[number] | null;
+  readonly placementStatus: typeof schema.projectStructurePlacementStatus.enumValues[number] | null;
+  readonly identityRole: string | null;
+  readonly identityNormalizedValue: string | null;
+  readonly identityParseStatus: typeof schema.documentIdentityParseStatus.enumValues[number] | null;
+  readonly identityParsedParts: Record<string, unknown> | null;
+  readonly typedDataData: Record<string, unknown> | null;
+}): ProjectStructureDocumentFacets {
+  const parsedParts = row.identityParsedParts ?? {};
+  const typedData = row.typedDataData ?? {};
+  const segments = readStringArray(parsedParts["segments"]) ?? splitCode(row.identityNormalizedValue);
+  const documentType = readString(typedData["kind"]) ?? readString(typedData["form"]);
+
+  return {
+    family: row.typeFamily,
+    stage: readString(parsedParts["stage"]) ?? inferStage(segments),
+    section: readString(parsedParts["sectionNumber"]) ?? inferSection(segments),
+    mark: readString(parsedParts["mark"]) ?? inferMark(segments),
+    documentGroup: readString(parsedParts["documentGroup"]) ?? inferDocumentGroup(segments),
+    documentType: documentType ?? null,
+    estimateKind: row.typeFamily === "estimate" ? documentType ?? null : null,
+    sourceTemplate:
+      readString(typedData["templateId"]) ??
+      readString(readRecord(typedData["schema"])?.["id"]) ??
+      null,
+    identityRole: readIdentityRole(row.identityRole),
+    parseStatus: row.identityParseStatus,
+    placedByCode: row.identityNormalizedValue
+  };
+}
+
+function splitCode(value: string | null): string[] {
+  return value?.split("-").filter(Boolean) ?? [];
+}
+
+function inferStage(segments: readonly string[]): string | null {
+  const stage = segments.find((segment) =>
+    ["П", "Р", "И", "ИИ", "P", "R", "I"].includes(segment)
+  );
+  if (!stage) return null;
+  const labels: Record<string, string> = {
+    P: "П",
+    R: "Р",
+    I: "И"
+  };
+  return labels[stage] ?? stage;
+}
+
+function inferSection(segments: readonly string[]): string | null {
+  const stageIndex = segments.findIndex((segment) =>
+    ["П", "Р", "И", "ИИ", "P", "R", "I"].includes(segment)
+  );
+  const candidates = stageIndex >= 0 ? segments.slice(stageIndex + 1) : segments;
+  return candidates.find((segment) => /^\d+(?:\/\d+)?$/.test(segment)) ?? null;
+}
+
+function inferMark(segments: readonly string[]): string | null {
+  const stageIndex = segments.findIndex((segment) =>
+    ["П", "Р", "И", "ИИ", "P", "R", "I"].includes(segment)
+  );
+  if (stageIndex < 0) return null;
+  const stage = inferStage(segments);
+  const candidate = [...segments]
+    .reverse()
+    .find((segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment) && segment !== stage);
+  return candidate ?? null;
+}
+
+function inferDocumentGroup(segments: readonly string[]): string | null {
+  const stageIndex = segments.findIndex((segment) =>
+    ["П", "Р", "И", "ИИ", "P", "R", "I"].includes(segment)
+  );
+  const candidates = stageIndex >= 0 ? segments.slice(stageIndex + 1, -1) : segments.slice(0, -1);
+  return candidates.find((segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment)) ?? null;
+}
+
+function readIdentityRole(value: string | null): "own_code" | "reference_code" | null {
+  return value === "own_code" || value === "reference_code" ? value : null;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? value
+    : undefined;
 }
 
 function toNumber(value: string | number): number {

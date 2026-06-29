@@ -63,7 +63,7 @@ and table extraction.
 
 ### Document Type Resolution
 
-Resolution of construction document family/type before type-specific extraction.
+Resolution of construction document family before family-specific extraction.
 
 Examples: estimate, drawing document, specification, title sheet, unsupported or
 uncertain document type.

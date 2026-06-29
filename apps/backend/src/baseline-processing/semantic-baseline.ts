@@ -90,8 +90,8 @@ export function buildTypedDataPayload(input: {
       ownCodeCandidate: undefined,
       warnings: [
         {
-          code: "estimate_reference_codes_do_not_place_source",
-          message: "Estimate basis/reference codes are relationship inputs only.",
+          code: "estimate_basis_reference_used_for_placement",
+          message: "Estimate basis/reference codes may be used as placement inputs for estimates.",
           severity: "info"
         }
       ]
@@ -276,7 +276,7 @@ export function parseSupportedGostCode(value: string): {
   readonly parts: Record<string, unknown>;
 } {
   const parts = parseCodeParts(value);
-  if (!parts.projectCode || !/^[A-Z][A-Z0-9]*$/.test(String(parts.projectCode))) {
+  if (!parts.projectCode || !/^[A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9]*$/u.test(String(parts.projectCode))) {
     return {
       status: "invalid",
       parts: {
@@ -311,11 +311,13 @@ export function parseSupportedGostCode(value: string): {
 
 export function parseCodeParts(value: string): Record<string, unknown> {
   if (!value) return {};
-  const segments = value.split("-").filter(Boolean);
+  const segments = splitCodeSegments(value);
   const stageIndex = segments.findIndex((segment) => isDocumentationStage(segment));
   const stage =
     stageIndex >= 0 ? normalizeDocumentationStage(segments[stageIndex]) : undefined;
-  const mark = stage === "P" ? undefined : stageIndex >= 0 ? segments[stageIndex + 1] : inferMarkSegment(segments);
+  const afterStage = stageIndex >= 0 ? segments.slice(stageIndex + 1) : [];
+  const hasPhysicalHierarchy = isPhysicalHierarchyCode(segments, stageIndex);
+  const mark = inferMarkSegment(segments, stageIndex);
   const sectionNumber = readPrefixedSegment(segments, "SEC");
   const subsectionTitle = readPrefixedSegment(segments, "SUBSEC");
   const volumeNumber = readPrefixedSegment(segments, "VOL");
@@ -326,12 +328,18 @@ export function parseCodeParts(value: string): Record<string, unknown> {
   return {
     raw: value,
     projectCode: segments[0],
+    siteCode: hasPhysicalHierarchy ? segments[1] : undefined,
     stage,
     mark,
-    sectionNumber,
+    sectionNumber: sectionNumber ?? inferSectionSegment(afterStage),
     subsectionTitle,
-    volumeNumber,
+    volumeNumber: volumeNumber ?? inferVolumeSegment(afterStage),
     revision,
+    documentGroup: inferDocumentGroupSegment(afterStage, mark),
+    documentNumber: inferDocumentNumberSegment(afterStage),
+    workCode: hasPhysicalHierarchy ? inferWorkCodeSegment(afterStage) : undefined,
+    subobjectCode: hasPhysicalHierarchy ? inferSubobjectCodeSegment(afterStage) : undefined,
+    partNumber: hasPhysicalHierarchy ? inferPartNumberSegment(afterStage) : undefined,
     placementAmbiguityCode,
     warnings: placementAmbiguityCode
       ? [
@@ -342,7 +350,6 @@ export function parseCodeParts(value: string): Record<string, unknown> {
           }
         ]
       : undefined,
-    documentGroup: segments.length > 1 ? segments[segments.length - 1] : undefined,
     segments
   };
 }
@@ -375,20 +382,21 @@ function normalizeCodeValue(value: unknown): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function inferDocumentationStage(value: string): "P" | "R" | "I" | undefined {
+function inferDocumentationStage(value: string): "П" | "Р" | "И" | "ИИ" | undefined {
   const segments = normalizeCodeValue(value)?.split("-") ?? [];
   const explicit = segments.find((segment) => isDocumentationStage(segment));
   if (explicit) return normalizeDocumentationStage(explicit);
   const lower = value.toLowerCase();
-  if (lower.includes("rd") || lower.includes("working")) return "R";
-  if (lower.includes("pd") || lower.includes("project")) return "P";
+  if (lower.includes("rd") || lower.includes("working")) return "Р";
+  if (lower.includes("pd") || lower.includes("project")) return "П";
   return undefined;
 }
 
-function normalizeDocumentationStage(value: string | undefined): "P" | "R" | "I" | undefined {
-  if (value === "P") return "P";
-  if (value === "R") return "R";
-  if (value === "I") return "I";
+function normalizeDocumentationStage(value: string | undefined): "П" | "Р" | "И" | "ИИ" | undefined {
+  if (value === "P" || value === "П") return "П";
+  if (value === "R" || value === "Р") return "Р";
+  if (value === "I" || value === "И") return "И";
+  if (value === "ИИ") return "ИИ";
   return undefined;
 }
 
@@ -396,8 +404,70 @@ function isDocumentationStage(value: string | undefined): boolean {
   return normalizeDocumentationStage(value) !== undefined;
 }
 
-function inferMarkSegment(segments: readonly string[]): string | undefined {
-  return segments.find((segment, index) => index > 0 && /^[A-Z]{1,6}$/.test(segment));
+function splitCodeSegments(value: string): string[] {
+  return value
+    .trim()
+    .toUpperCase()
+    .split(/[-.\s]+/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function inferMarkSegment(
+  segments: readonly string[],
+  stageIndex: number
+): string | undefined {
+  const candidates = stageIndex >= 0 ? segments.slice(stageIndex + 1) : segments.slice(1);
+  return [...candidates]
+    .reverse()
+    .find((segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment) && !isDocumentationStage(segment));
+}
+
+function isPhysicalHierarchyCode(segments: readonly string[], stageIndex: number): boolean {
+  return (
+    stageIndex >= 2 &&
+    typeof segments[0] === "string" &&
+    typeof segments[1] === "string" &&
+    /^\d+$/.test(segments[0]) &&
+    /^\d+$/.test(segments[1])
+  );
+}
+
+function inferSectionSegment(segmentsAfterStage: readonly string[]): string | undefined {
+  return segmentsAfterStage.find((segment) => /^\d+(?:\/\d+)?$/.test(segment));
+}
+
+function inferVolumeSegment(segmentsAfterStage: readonly string[]): string | undefined {
+  return segmentsAfterStage.find((segment) => /^\d{4}$/.test(segment));
+}
+
+function inferDocumentGroupSegment(
+  segmentsAfterStage: readonly string[],
+  mark: string | undefined
+): string | undefined {
+  return segmentsAfterStage.find(
+    (segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment) && segment !== mark
+  );
+}
+
+function inferDocumentNumberSegment(segmentsAfterStage: readonly string[]): string | undefined {
+  const groupIndex = segmentsAfterStage.findIndex((segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment));
+  return groupIndex >= 0 ? segmentsAfterStage[groupIndex + 1] : undefined;
+}
+
+function inferWorkCodeSegment(segmentsAfterStage: readonly string[]): string | undefined {
+  const groupIndex = segmentsAfterStage.findIndex((segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment));
+  return groupIndex >= 0 ? segmentsAfterStage[groupIndex + 2] : undefined;
+}
+
+function inferSubobjectCodeSegment(segmentsAfterStage: readonly string[]): string | undefined {
+  const groupIndex = segmentsAfterStage.findIndex((segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment));
+  return groupIndex >= 0 ? segmentsAfterStage[groupIndex + 3] : undefined;
+}
+
+function inferPartNumberSegment(segmentsAfterStage: readonly string[]): string | undefined {
+  const groupIndex = segmentsAfterStage.findIndex((segment) => /^[A-ZА-ЯЁ]{1,8}$/u.test(segment));
+  return groupIndex >= 0 ? segmentsAfterStage[groupIndex + 4] : undefined;
 }
 
 function readPrefixedSegment(
@@ -414,9 +484,9 @@ function buildPackageContext(
 ): Record<string, unknown> | undefined {
   if (!normalizedCode) return undefined;
   const parts = parseCodeParts(normalizedCode);
-  if (parts.stage !== "P") return undefined;
+  if (parts.stage !== "П") return undefined;
   return {
-    stage: typedField("P", [source]),
+    stage: typedField("П", [source]),
     projectDesignation: typedField(parts.projectCode, [source]),
     sectionNumber: typedField(parts.sectionNumber, [source]),
     subsectionTitle: typedField(parts.subsectionTitle, [source]),

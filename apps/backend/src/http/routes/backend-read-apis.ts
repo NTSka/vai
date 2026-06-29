@@ -67,7 +67,20 @@ const nodeDocumentsResponseSchema = z.object({
           family: z.enum(["estimate", "drawing", "statement", "unsupported", "unknown"]),
           confidence: z.string()
         })
-        .nullable()
+        .nullable(),
+      facets: z.object({
+        family: z.string().nullable(),
+        stage: z.string().nullable(),
+        section: z.string().nullable(),
+        mark: z.string().nullable(),
+        documentGroup: z.string().nullable(),
+        documentType: z.string().nullable(),
+        estimateKind: z.string().nullable(),
+        sourceTemplate: z.string().nullable(),
+        identityRole: z.enum(["own_code", "reference_code"]).nullable(),
+        parseStatus: z.enum(["parsed", "invalid", "missing", "unsupported"]).nullable(),
+        placedByCode: z.string().nullable()
+      })
     })
   )
 });

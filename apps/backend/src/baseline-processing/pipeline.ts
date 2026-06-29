@@ -43,6 +43,10 @@ import {
   type XlsxCellPayloadStorage
 } from "./xlsx-artifacts.js";
 import {
+  buildEstimateXlsxPayloadFromContentArtifacts,
+  detectEstimateXlsxTemplates
+} from "./estimate-xlsx.js";
+import {
   buildEmbeddedStatementPayload,
   buildIdentityInputs as buildSemanticIdentityInputs,
   buildMissingOwnIdentityInput as buildSemanticMissingOwnIdentityInput,
@@ -108,6 +112,10 @@ export function registerBaselineOrchestrators(input: {
     processorId: "content_probe",
     jobType: "content_probe"
   });
+  registerVersionToJob(input, "xlsx-cell-extractor", "file_technical.completed", {
+    processorId: "xlsx_cell_extractor",
+    jobType: "xlsx_cell_extraction"
+  });
   registerVersionToJob(input, "gost-title-block-interpreter", "content.probed", {
     processorId: "gost_title_block_interpreter",
     jobType: "gost_title_block_interpretation"
@@ -116,9 +124,11 @@ export function registerBaselineOrchestrators(input: {
     processorId: "document_type_resolver",
     jobType: "document_type_resolution"
   });
-  // Full content extraction is intentionally disabled while the pipeline is
-  // being validated through stamp probing and document type resolution.
-  registerVersionToJob(input, "typed-data-extractor", "content.extracted", {
+  registerVersionToJob(input, "document-type-resolver-content", "content.extracted", {
+    processorId: "document_type_resolver",
+    jobType: "document_type_resolution"
+  });
+  registerVersionToJob(input, "typed-data-extractor", "document_type.resolved", {
     processorId: "typed_data_extractor",
     jobType: "typed_data_extraction"
   });
@@ -181,6 +191,11 @@ export function registerBaselineProcessors(input: {
     processorId: "gost_title_block_interpreter",
     jobType: "gost_title_block_interpretation",
     handler: (job) => executeGostTitleBlockInterpretation(input, job)
+  });
+  input.registry.register({
+    processorId: "xlsx_cell_extractor",
+    jobType: "xlsx_cell_extraction",
+    handler: (job) => executeXlsxCellExtraction(input, job)
   });
   input.registry.register({
     processorId: "content_placeholder",
@@ -542,6 +557,10 @@ async function executeContentProbe(
       job,
       payload
     });
+    await completeJobAndPublishEvents(input.processing, job, [
+      buildVersionEvent(job, "content.probed", payload)
+    ]);
+    return;
   } else {
     await input.baselineFacts.upsertContentArtifact({
       organizationId: job.organizationId,
@@ -561,11 +580,12 @@ async function executeContentProbe(
       },
       producedByJobId: job.id
     });
+    await input.processing.completeJob({
+      organizationId: job.organizationId,
+      id: job.id
+    });
+    return;
   }
-
-  await completeJobAndPublishEvents(input.processing, job, [
-    buildVersionEvent(job, "content.probed", payload)
-  ]);
 }
 
 async function executeGostTitleBlockInterpretation(
@@ -595,6 +615,67 @@ async function executeGostTitleBlockInterpretation(
   });
   await completeJobAndPublishEvents(input.processing, job, [
     buildVersionEvent(job, "title_block.interpreted", payload)
+  ]);
+}
+
+async function executeXlsxCellExtraction(
+  input: {
+    readonly processing: ProcessingRepository;
+    readonly baselineFacts: BaselineFactsRepository;
+    readonly documentRegistry: DocumentRegistryRepository;
+    readonly objectStorage?: ObjectStorageClient;
+  },
+  job: ProcessingJob
+): Promise<void> {
+  const payload = parseJobPayload(documentVersionPayloadSchema, job);
+  const detection = await input.baselineFacts.findFileFormatDetection({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+  if (detection?.format !== "xlsx") {
+    await input.processing.completeJob({
+      organizationId: job.organizationId,
+      id: job.id
+    });
+    return;
+  }
+
+  const storedFile = await input.baselineFacts.findStoredFileForVersion({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+  if (!storedFile) {
+    await failJob(input.processing, job, "stored_file_not_found", payload);
+    return;
+  }
+  const workbookArtifact = await input.baselineFacts.findContentArtifact({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId,
+    artifactType: "xlsx_workbook"
+  });
+  if (!workbookArtifact || workbookArtifact.payload["status"] === "failed") {
+    await failJob(input.processing, job, "xlsx_workbook_artifact_missing", payload);
+    return;
+  }
+  if (!input.objectStorage) {
+    await failJob(input.processing, job, "object_storage_required", payload);
+    return;
+  }
+
+  const extracted = await persistXlsxCellOutputs({
+    processing: input.processing,
+    baselineFacts: input.baselineFacts,
+    documentRegistry: input.documentRegistry,
+    objectStorage: input.objectStorage,
+    job,
+    payload,
+    storedFile
+  });
+  if (!extracted) {
+    return;
+  }
+  await completeJobAndPublishEvents(input.processing, job, [
+    buildVersionEvent(job, "content.extracted", payload)
   ]);
 }
 
@@ -638,35 +719,18 @@ async function executeContentPlaceholder(
       return;
     }
 
-    const workbook = await loadXlsxWorkbookForProcessor({
+    const extracted = await persistXlsxCellOutputs({
+      processing: input.processing,
+      baselineFacts: input.baselineFacts,
+      documentRegistry: input.documentRegistry,
       objectStorage: input.objectStorage,
-      bucket: storedFile.storage.bucket,
-      key: storedFile.storage.key
-    }).catch(async (error: unknown) => {
-      if (isXlsxParseError(error)) {
-        await persistFailedXlsxContentOutcome(input, job, payload, error);
-        return undefined;
-      }
-      throw error;
+      job,
+      payload,
+      storedFile
     });
-    if (!workbook) {
+    if (!extracted) {
       return;
     }
-    const cellStorage = await storeXlsxCellPayload({
-      organizationId: job.organizationId,
-      documentVersionId: payload.documentVersionId,
-      jobId: job.id,
-      objectStorage: input.objectStorage,
-      bucket: storedFile.storage.bucket,
-      cells: buildXlsxCellsPayload(workbook)
-    });
-    await input.baselineFacts.upsertContentArtifact({
-      organizationId: job.organizationId,
-      documentVersionId: payload.documentVersionId,
-      artifactType: "xlsx_cells",
-      payload: buildXlsxContentArtifactPayload(cellStorage),
-      producedByJobId: job.id
-    });
     await completeJobAndPublishEvents(input.processing, job, [
       buildVersionEvent(job, "content.extracted", payload)
     ]);
@@ -716,6 +780,7 @@ async function executeDocumentTypeResolution(
     readonly processing: ProcessingRepository;
     readonly baselineFacts: BaselineFactsRepository;
     readonly eventing: EventingRepository;
+    readonly objectStorage?: ObjectStorageClient;
   },
   job: ProcessingJob
 ): Promise<void> {
@@ -733,9 +798,28 @@ async function executeDocumentTypeResolution(
     organizationId: job.organizationId,
     documentVersionId: payload.documentVersionId
   });
+  const detection = await input.baselineFacts.findFileFormatDetection({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+  const contentArtifacts = await input.baselineFacts.listContentArtifacts({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+  const readableContentArtifacts =
+    detection?.format === "xlsx"
+      ? await hydrateXlsxCellContentArtifacts({
+          artifacts: contentArtifacts,
+          objectStorage: input.objectStorage
+        })
+      : contentArtifacts;
   const titleBlockRouting = titleBlockRoutingEvidence(titleBlock?.evidence, titleBlock?.status);
+  const estimateTemplateMatch =
+    detection?.format === "xlsx" ? bestEstimateTemplateMatch(readableContentArtifacts) : undefined;
   const family = titleBlockRouting
     ? "drawing"
+    : estimateTemplateMatch
+      ? "estimate"
     : inferSemanticFamily(storedFile.originalName);
   await input.baselineFacts.upsertDocumentTypeResolution({
     organizationId: job.organizationId,
@@ -743,6 +827,8 @@ async function executeDocumentTypeResolution(
     family,
     confidence: titleBlockRouting
       ? titleBlockRouting.confidence
+      : estimateTemplateMatch
+        ? `estimate_template_${estimateTemplateMatch.confidence}`
       : family === "unknown"
         ? "low"
         : "semantic_baseline",
@@ -759,6 +845,7 @@ async function executeTypedDataExtraction(
     readonly processing: ProcessingRepository;
     readonly baselineFacts: BaselineFactsRepository;
     readonly eventing: EventingRepository;
+    readonly objectStorage?: ObjectStorageClient;
   },
   job: ProcessingJob
 ): Promise<void> {
@@ -781,12 +868,28 @@ async function executeTypedDataExtraction(
     organizationId: job.organizationId,
     documentVersionId: payload.documentVersionId
   });
-  const typedData = buildSemanticTypedDataPayload({
-    family: resolution.family,
-    originalName: storedFile.originalName,
-    stem,
-    contentArtifacts
-  });
+  const readableContentArtifacts =
+    resolution.family === "estimate"
+      ? await hydrateXlsxCellContentArtifacts({
+          artifacts: contentArtifacts,
+          objectStorage: input.objectStorage
+        })
+      : contentArtifacts;
+  const typedData =
+    resolution.family === "estimate"
+      ? buildEstimateXlsxPayloadFromContentArtifacts(readableContentArtifacts) ??
+        buildSemanticTypedDataPayload({
+          family: resolution.family,
+          originalName: storedFile.originalName,
+          stem,
+          contentArtifacts: readableContentArtifacts
+        })
+      : buildSemanticTypedDataPayload({
+          family: resolution.family,
+          originalName: storedFile.originalName,
+          stem,
+          contentArtifacts
+        });
   const primaryTypedDataRecord = await input.baselineFacts.upsertTypedDataRecord({
     organizationId: job.organizationId,
     documentVersionId: payload.documentVersionId,
@@ -861,10 +964,11 @@ async function executeDocumentIdentityResolution(
     sourceTypedDataRecordIds: [...ownIdentityInput.sourceTypedDataRecordIds],
     producedByJobId: job.id
   });
+  const referenceIdentities: (typeof schema.documentIdentities.$inferSelect)[] = [];
   for (const referenceIdentityInput of identityInputs.filter(
     (candidate) => candidate.role === "reference_code"
   )) {
-    await input.baselineFacts.upsertDocumentIdentity({
+    const referenceIdentity = await input.baselineFacts.upsertDocumentIdentity({
       organizationId: job.organizationId,
       documentId: version.documentId,
       documentVersionId: payload.documentVersionId,
@@ -876,17 +980,25 @@ async function executeDocumentIdentityResolution(
       sourceTypedDataRecordIds: [...referenceIdentityInput.sourceTypedDataRecordIds],
       producedByJobId: job.id
     });
+    referenceIdentities.push(referenceIdentity);
   }
+  const placementIdentity =
+    selectPlacementIdentity({ typedDataRecords, ownIdentity, referenceIdentities }) ??
+    ownIdentity;
   await completeJobAndPublishEvents(input.processing, job, [
     {
-    type: "document_identity.resolved",
-    version: "1",
-    source: "document-identity",
-    aggregateType: "document_identity",
-    aggregateId: ownIdentity.id,
-    payload: { ...payload, organizationId: job.organizationId, documentIdentityId: ownIdentity.id },
-    causationId: job.id,
-    ...(job.correlationId ? { correlationId: job.correlationId } : {})
+      type: "document_identity.resolved",
+      version: "1",
+      source: "document-identity",
+      aggregateType: "document_identity",
+      aggregateId: placementIdentity.id,
+      payload: {
+        ...payload,
+        organizationId: job.organizationId,
+        documentIdentityId: placementIdentity.id
+      },
+      causationId: job.id,
+      ...(job.correlationId ? { correlationId: job.correlationId } : {})
     }
   ]);
 }
@@ -996,20 +1108,17 @@ async function executeBaselineSummary(
         })
       ];
     }
-    const identity = identities.find(
-      (candidate) => candidate.documentVersionId === version.id && candidate.role === "own_code"
+    const placement = placements.find(
+      (candidate) => candidate.documentVersionId === version.id
     );
-    if (identity && identity.parseStatus !== "parsed") {
+    if (!placement || placement.status === "unplaced") {
       return [
         createBaselineWarning("document_identity_unplaced", {
           documentVersionId: version.id
         })
       ];
     }
-    const placement = placements.find(
-      (candidate) => candidate.documentVersionId === version.id
-    );
-    if (placement?.status === "ambiguous") {
+    if (placement.status === "ambiguous") {
       return [
         createBaselineWarning("project_structure_placement_ambiguous", {
           documentVersionId: version.id
@@ -1134,12 +1243,12 @@ async function findOrCreatePlacementNode(input: {
   readonly organizationId: string;
   readonly identity: typeof schema.documentIdentities.$inferSelect;
 }): Promise<typeof schema.projectStructureNodes.$inferSelect> {
-  if (input.identity.role !== "own_code" || input.identity.parseStatus !== "parsed") {
+  if (!canPlaceIdentity(input.identity)) {
     return input.projectStructure.findOrCreateNode({
       organizationId: input.organizationId,
       kind: "document_group",
       key: "unplaced",
-      title: "Unplaced documents",
+      title: "Неразмещенные документы",
       subject: "document_group",
       sourceIdentityIds: [input.identity.id]
     });
@@ -1151,7 +1260,7 @@ async function findOrCreatePlacementNode(input: {
       organizationId: input.organizationId,
       kind: "document_group",
       key: "unplaced",
-      title: "Unplaced documents",
+      title: "Неразмещенные документы",
       subject: "document_group",
       sourceIdentityIds: [input.identity.id]
     });
@@ -1166,15 +1275,55 @@ async function findOrCreatePlacementNode(input: {
     sourceIdentityIds: [input.identity.id]
   });
 
+  const siteCode = readString(input.identity.parsedParts["siteCode"]);
+  const workCode = readString(input.identity.parsedParts["workCode"]);
+  const subobjectCode = readString(input.identity.parsedParts["subobjectCode"]);
+  if (siteCode || workCode || subobjectCode) {
+    if (siteCode) {
+      current = await input.projectStructure.findOrCreateNode({
+        organizationId: input.organizationId,
+        kind: "complex_kind",
+        key: siteCode,
+        title: `Площадка ${siteCode}`,
+        subject: "object",
+        parentId: current.id,
+        sourceIdentityIds: [input.identity.id]
+      });
+    }
+    if (workCode) {
+      current = await input.projectStructure.findOrCreateNode({
+        organizationId: input.organizationId,
+        kind: "complex_part_kind",
+        key: workCode,
+        title: `Объект/работа ${workCode}`,
+        subject: "object",
+        parentId: current.id,
+        sourceIdentityIds: [input.identity.id]
+      });
+    }
+    if (subobjectCode) {
+      current = await input.projectStructure.findOrCreateNode({
+        organizationId: input.organizationId,
+        kind: "complex_part_number",
+        key: subobjectCode,
+        title: `Подобъект ${subobjectCode}`,
+        subject: "subobject",
+        parentId: current.id,
+        sourceIdentityIds: [input.identity.id]
+      });
+    }
+    return current;
+  }
+
   const stage = readString(input.identity.parsedParts["stage"]);
-  if (stage === "P") {
+  if (stage === "П") {
     const sectionNumber = readString(input.identity.parsedParts["sectionNumber"]);
     if (sectionNumber) {
       current = await input.projectStructure.findOrCreateNode({
         organizationId: input.organizationId,
         kind: "documentation_section",
         key: sectionNumber,
-        title: `Section ${sectionNumber}`,
+        title: `Раздел ${sectionNumber}`,
         subject: "documentation_section",
         parentId: current.id,
         sourceIdentityIds: [input.identity.id]
@@ -1200,7 +1349,7 @@ async function findOrCreatePlacementNode(input: {
         organizationId: input.organizationId,
         kind: "documentation_volume",
         key: volumeNumber,
-        title: `Volume ${volumeNumber}`,
+        title: `Том ${volumeNumber}`,
         subject: "documentation_volume",
         parentId: current.id,
         sourceIdentityIds: [input.identity.id]
@@ -1242,10 +1391,40 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function selectPlacementIdentity(input: {
+  readonly typedDataRecords: readonly (typeof schema.typedDataRecords.$inferSelect)[];
+  readonly ownIdentity: typeof schema.documentIdentities.$inferSelect;
+  readonly referenceIdentities: readonly (typeof schema.documentIdentities.$inferSelect)[];
+}): typeof schema.documentIdentities.$inferSelect | undefined {
+  if (!input.typedDataRecords.some((record) => record.family === "estimate")) {
+    return input.ownIdentity;
+  }
+
+  return (
+    input.referenceIdentities.find(
+      (identity) => identity.parseStatus === "parsed" && canPlaceIdentity(identity)
+    ) ??
+    input.referenceIdentities.find((identity) => canPlaceIdentity(identity)) ??
+    input.ownIdentity
+  );
+}
+
+function canPlaceIdentity(
+  identity: typeof schema.documentIdentities.$inferSelect
+): boolean {
+  if (identity.role === "own_code") {
+    return identity.parseStatus === "parsed";
+  }
+  if (identity.role === "reference_code") {
+    return Boolean(readString(identity.parsedParts["projectCode"]));
+  }
+  return false;
+}
+
 function placementStatusForIdentity(
   identity: typeof schema.documentIdentities.$inferSelect
 ): "placed" | "ambiguous" | "unplaced" {
-  if (identity.role !== "own_code" || identity.parseStatus !== "parsed") {
+  if (!canPlaceIdentity(identity)) {
     return "unplaced";
   }
   return readString(identity.parsedParts["placementAmbiguityCode"]) ? "ambiguous" : "placed";
@@ -1489,6 +1668,52 @@ async function persistPdfStampProbeOutputs(input: {
   } catch (error) {
     throw classifyPdfTechnicalError(error);
   }
+}
+
+async function persistXlsxCellOutputs(input: {
+  readonly processing: ProcessingRepository;
+  readonly baselineFacts: BaselineFactsRepository;
+  readonly documentRegistry: DocumentRegistryRepository;
+  readonly objectStorage: ObjectStorageClient;
+  readonly job: ProcessingJob;
+  readonly payload: z.infer<typeof documentVersionPayloadSchema>;
+  readonly storedFile: {
+    readonly storage: {
+      readonly bucket?: string;
+      readonly key: string;
+    };
+  };
+}): Promise<boolean> {
+  const workbook = await loadXlsxWorkbookForProcessor({
+    objectStorage: input.objectStorage,
+    bucket: input.storedFile.storage.bucket,
+    key: input.storedFile.storage.key
+  }).catch(async (error: unknown) => {
+    if (isXlsxParseError(error)) {
+      await persistFailedXlsxContentOutcome(input, input.job, input.payload, error);
+      return undefined;
+    }
+    throw error;
+  });
+  if (!workbook) {
+    return false;
+  }
+  const cellStorage = await storeXlsxCellPayload({
+    organizationId: input.job.organizationId,
+    documentVersionId: input.payload.documentVersionId,
+    jobId: input.job.id,
+    objectStorage: input.objectStorage,
+    bucket: input.storedFile.storage.bucket,
+    cells: buildXlsxCellsPayload(workbook)
+  });
+  await input.baselineFacts.upsertContentArtifact({
+    organizationId: input.job.organizationId,
+    documentVersionId: input.payload.documentVersionId,
+    artifactType: "xlsx_cells",
+    payload: buildXlsxContentArtifactPayload(cellStorage),
+    producedByJobId: input.job.id
+  });
+  return true;
 }
 
 async function persistFailedXlsxTechnicalOutcome(
@@ -1877,6 +2102,90 @@ function buildPdfStampSourceFieldsPayload(input: {
       }
     ]
   };
+}
+
+function bestEstimateTemplateMatch(
+  artifacts: readonly (typeof schema.contentArtifacts.$inferSelect)[]
+): ReturnType<typeof detectEstimateXlsxTemplates>[number] | undefined {
+  return artifacts
+    .filter((artifact) => artifact.artifactType === "xlsx_cells")
+    .flatMap((artifact) =>
+      detectEstimateXlsxTemplates({
+        cells: readRecordArray(artifact.payload["cells"]),
+        artifactId: artifact.id,
+        artifactType: artifact.artifactType
+      })
+    )
+    .sort((left, right) => right.score - left.score)[0];
+}
+
+async function hydrateXlsxCellContentArtifacts(input: {
+  readonly artifacts: readonly (typeof schema.contentArtifacts.$inferSelect)[];
+  readonly objectStorage: ObjectStorageClient | undefined;
+}): Promise<(typeof schema.contentArtifacts.$inferSelect)[]> {
+  const hydrated: (typeof schema.contentArtifacts.$inferSelect)[] = [];
+  for (const artifact of input.artifacts) {
+    if (artifact.artifactType !== "xlsx_cells" || artifact.payload["storage"] !== "payload_ref") {
+      hydrated.push(artifact);
+      continue;
+    }
+    hydrated.push({
+      ...artifact,
+      payload: await readXlsxCellPayloadRef({
+        payload: artifact.payload,
+        objectStorage: input.objectStorage
+      })
+    });
+  }
+  return hydrated;
+}
+
+async function readXlsxCellPayloadRef(input: {
+  readonly payload: Record<string, unknown>;
+  readonly objectStorage: ObjectStorageClient | undefined;
+}): Promise<Record<string, unknown>> {
+  if (!input.objectStorage) {
+    throw new ProcessorExecutionError({
+      code: "object_storage_required",
+      message: "Object storage is required to read XLSX cell payload references",
+      retryable: false
+    });
+  }
+  const payloadRef = readRecord(input.payload["payloadRef"]);
+  const bucket = readPayloadRefString(payloadRef?.["bucket"], "xlsx cell payload bucket");
+  const key = readPayloadRefString(payloadRef?.["key"], "xlsx cell payload key");
+  const bytes = await readObjectBytes({
+    objectStorage: input.objectStorage,
+    bucket,
+    key,
+    code: "xlsx_cell_payload_ref_read_failed"
+  });
+  try {
+    const parsed = JSON.parse(Buffer.from(bytes).toString("utf8"));
+    const record = readRecord(parsed);
+    if (!record || !Array.isArray(record["cells"])) {
+      throw new Error("XLSX cell payload JSON does not contain cells");
+    }
+    return record;
+  } catch (error) {
+    throw new ProcessorExecutionError({
+      code: "xlsx_cell_payload_ref_invalid",
+      message: "XLSX cell payload reference does not contain a valid cell collection",
+      retryable: false,
+      details: { cause: error instanceof Error ? error.message : String(error) }
+    });
+  }
+}
+
+function readPayloadRefString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new ProcessorExecutionError({
+      code: "payload_ref_invalid",
+      message: `${label} is missing from payload reference`,
+      retryable: false
+    });
+  }
+  return value;
 }
 
 function buildGostTitleBlockInterpretation(
