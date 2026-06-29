@@ -66,13 +66,30 @@ export type MvpSeedResult = {
   readonly login: string;
 };
 
-export function readMvpSeedInput(env: NodeJS.ProcessEnv = process.env): MvpSeedInput {
+export function readMvpSeedInput(
+  env: NodeJS.ProcessEnv = process.env
+): MvpSeedInput {
   return {
     email: env.MVP_SEED_EMAIL ?? "mvp.user@example.test",
     fullName: env.MVP_SEED_FULL_NAME ?? "MVP User",
     password: requiredEnv(env, "MVP_SEED_PASSWORD"),
     organizationName: env.MVP_SEED_ORGANIZATION ?? "MVP Organization"
   };
+}
+
+export function readMvpSeedInputs(
+  env: NodeJS.ProcessEnv = process.env
+): readonly MvpSeedInput[] {
+  return [
+    readMvpSeedInput(env),
+    {
+      email: env.MVP_TEST_SEED_EMAIL ?? "mvp.autotest@example.test",
+      fullName: env.MVP_TEST_SEED_FULL_NAME ?? "MVP Autotest User",
+      password: requiredEnv(env, "MVP_TEST_SEED_PASSWORD"),
+      organizationName:
+        env.MVP_TEST_SEED_ORGANIZATION ?? "MVP Autotest Organization"
+    }
+  ];
 }
 
 function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
@@ -162,6 +179,26 @@ export async function seedMvp(input: {
   });
 }
 
+export async function seedMvpAccounts(input: {
+  readonly db: Db;
+  readonly seeds: readonly MvpSeedInput[];
+  readonly passwordHasher: Pick<PasswordVerifier, "hash">;
+}): Promise<readonly MvpSeedResult[]> {
+  const results: MvpSeedResult[] = [];
+
+  for (const seed of input.seeds) {
+    results.push(
+      await seedMvp({
+        db: input.db,
+        seed,
+        passwordHasher: input.passwordHasher
+      })
+    );
+  }
+
+  return results;
+}
+
 async function main(): Promise<void> {
   const config = loadBackendConfig();
   const client = new Client({ connectionString: config.databaseUrl });
@@ -171,9 +208,9 @@ async function main(): Promise<void> {
   try {
     const db = drizzle(client, { schema: schema.schema });
     const passwordVerifier = createArgon2PasswordVerifier();
-    const result = await seedMvp({
+    const result = await seedMvpAccounts({
       db,
-      seed: readMvpSeedInput(),
+      seeds: readMvpSeedInputs(),
       passwordHasher: passwordVerifier
     });
 

@@ -10,7 +10,7 @@ import ExcelJS from "exceljs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createTestConfig } from "../../test-support/config.js";
-import { seedMvp } from "../../cli/seed-mvp.js";
+import { seedMvp, seedMvpAccounts } from "../../cli/seed-mvp.js";
 import { buildApp } from "../../app.js";
 import { createJwtIssuer } from "../../auth/jwt.js";
 import type { AuthService, AuthSession } from "../../auth/types.js";
@@ -2357,6 +2357,63 @@ describe("Phase 4 seed", () => {
         eq(schema.organizationMemberRoles.organizationMemberId, first.membershipId)
       )
     ).toBe(1);
+  });
+
+  dbIt("seeds manual and autotest accounts into separate organizations", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const seeds = [
+      {
+        email: "manual-seed@example.test",
+        fullName: "Manual Seed",
+        password: "manual-password",
+        organizationName: "Manual Seed Organization"
+      },
+      {
+        email: "autotest-seed@example.test",
+        fullName: "Autotest Seed",
+        password: "autotest-password",
+        organizationName: "Autotest Seed Organization"
+      }
+    ];
+    const passwordHasher = {
+      async hash(password: string) {
+        return `test-hash:${password}`;
+      }
+    };
+
+    const first = await seedMvpAccounts({
+      db: database,
+      seeds,
+      passwordHasher
+    });
+    const second = await seedMvpAccounts({
+      db: database,
+      seeds,
+      passwordHasher
+    });
+
+    expect(second).toEqual(first);
+    expect(first).toHaveLength(2);
+    expect(first[0]?.organizationId).not.toEqual(first[1]?.organizationId);
+    expect(
+      await countRows(
+        database,
+        schema.users,
+        inArray(schema.users.email, seeds.map((seed) => seed.email))
+      )
+    ).toBe(2);
+    expect(
+      await countRows(
+        database,
+        schema.organizations,
+        inArray(
+          schema.organizations.name,
+          seeds.map((seed) => seed.organizationName)
+        )
+      )
+    ).toBe(2);
   });
 });
 
