@@ -70,9 +70,17 @@ export function readMvpSeedInput(env: NodeJS.ProcessEnv = process.env): MvpSeedI
   return {
     email: env.MVP_SEED_EMAIL ?? "mvp.user@example.test",
     fullName: env.MVP_SEED_FULL_NAME ?? "MVP User",
-    password: env.MVP_SEED_PASSWORD ?? "mvp-password",
+    password: requiredEnv(env, "MVP_SEED_PASSWORD"),
     organizationName: env.MVP_SEED_ORGANIZATION ?? "MVP Organization"
   };
+}
+
+function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
+  const value = env[name];
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+  return value;
 }
 
 export async function seedMvp(input: {

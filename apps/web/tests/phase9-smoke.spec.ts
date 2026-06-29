@@ -2,10 +2,16 @@ import { expect, test } from "@playwright/test";
 
 test("login, upload, source, and typed-data MVP flow", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Email").fill(process.env.MVP_SEED_EMAIL ?? "mvp.user@example.test");
+  const email = process.env.MVP_SEED_EMAIL ?? "mvp.user@example.test";
+  const password = process.env.MVP_SEED_PASSWORD;
+  if (!password) {
+    throw new Error("MVP_SEED_PASSWORD is required for the smoke test");
+  }
+
+  await page.getByLabel("Email").fill(email);
   await page
     .getByLabel("Password")
-    .fill(process.env.MVP_SEED_PASSWORD ?? "mvp-password");
+    .fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page.getByRole("heading", { name: /MVP Organization/i })).toBeVisible();

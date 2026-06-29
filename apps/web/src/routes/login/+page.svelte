@@ -4,8 +4,8 @@
   import { api, ApiError } from "$lib/api/client";
   import { session } from "$lib/session";
 
-  let login = "mvp.user@example.test";
-  let password = "mvp-password";
+  let login = "";
+  let password = "";
   let submitting = false;
   let errorMessage = "";
 

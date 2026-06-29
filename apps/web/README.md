@@ -18,10 +18,12 @@ paths to `http://127.0.0.1:3000` by default. Override the backend target with:
 PUBLIC_BACKEND_ORIGIN=http://127.0.0.1:3000 pnpm --filter @vai/web dev
 ```
 
-The seeded login defaults are:
+The seeded login email defaults to:
 
 - email: `mvp.user@example.test`
-- password: `mvp-password`
+
+Set `MVP_SEED_PASSWORD` explicitly when seeding local data. The login form does
+not prefill credentials.
 
 Regenerate frontend API types after backend route contract changes:
 
