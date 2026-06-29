@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Database, Download, FileText, RotateCcw } from "@lucide/svelte";
+  import { ChevronLeft, ChevronRight, Database, Download, FileText, RotateCcw } from "@lucide/svelte";
 
   import type { NodeDocument } from "$lib/api/types";
 
@@ -48,6 +48,10 @@
     placementStatus: "",
     parseStatus: ""
   };
+  let page = 1;
+  let pageSize = 25;
+  let previousTitle = title;
+  let previousFilterSignature = "";
 
   $: activeFilterCount = Object.values(filters).filter(Boolean).length;
   $: filteredDocuments = documents.filter((document) =>
@@ -56,6 +60,21 @@
       return !selected || facetValue(document, key) === selected;
     })
   );
+  $: totalPages = Math.max(1, Math.ceil(filteredDocuments.length / pageSize));
+  $: if (page > totalPages) page = totalPages;
+  $: if (page < 1) page = 1;
+  $: pageStart = filteredDocuments.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  $: pageEnd = Math.min(page * pageSize, filteredDocuments.length);
+  $: paginatedDocuments = filteredDocuments.slice(pageStart - 1, pageEnd);
+  $: if (title !== previousTitle) {
+    previousTitle = title;
+    page = 1;
+  }
+  $: filterSignature = JSON.stringify(filters);
+  $: if (filterSignature !== previousFilterSignature) {
+    previousFilterSignature = filterSignature;
+    page = 1;
+  }
 
   function sourceUrl(documentVersionId: string): string {
     return `/app/source/${encodeURIComponent(documentVersionId)}`;
@@ -79,6 +98,10 @@
       placementStatus: "",
       parseStatus: ""
     };
+  }
+
+  function goToPage(nextPage: number) {
+    page = Math.min(Math.max(nextPage, 1), totalPages);
   }
 
   function filterOptions(key: FilterKey): string[] {
@@ -170,7 +193,7 @@
   }
 </script>
 
-<section class="panel min-h-[360px]">
+<section class="panel flex min-h-[360px] flex-col overflow-hidden lg:min-h-0">
   <div class="border-b border-line p-4">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -226,8 +249,46 @@
         В выбранной группе нет документов с такими фильтрами.
       </div>
     {:else}
-      <div class="divide-y divide-line">
-        {#each filteredDocuments as document (document.documentVersionId)}
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <p class="text-xs text-slate-600">
+          Показано {pageStart}-{pageEnd} из {filteredDocuments.length}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="flex items-center gap-2 text-xs text-slate-600">
+            На странице
+            <select class="field h-8 w-20 py-1 text-xs" bind:value={pageSize}>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </label>
+          <div class="flex items-center gap-1">
+            <button
+              class="icon-button h-8 w-8"
+              type="button"
+              disabled={page <= 1}
+              title="Предыдущая страница"
+              on:click={() => goToPage(page - 1)}
+            >
+              <ChevronLeft size={15} aria-hidden="true" />
+            </button>
+            <span class="min-w-16 text-center text-xs font-medium text-slate-700">
+              {page} / {totalPages}
+            </span>
+            <button
+              class="icon-button h-8 w-8"
+              type="button"
+              disabled={page >= totalPages}
+              title="Следующая страница"
+              on:click={() => goToPage(page + 1)}
+            >
+              <ChevronRight size={15} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="min-h-0 flex-1 divide-y divide-line overflow-auto">
+        {#each paginatedDocuments as document (document.documentVersionId)}
           <article class="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_auto]">
             <div class="min-w-0">
               <h3 class="flex min-w-0 items-center gap-2 text-sm font-semibold text-ink">
@@ -288,6 +349,31 @@
           </article>
         {/each}
       </div>
+      {#if totalPages > 1}
+        <div class="flex items-center justify-between border-t border-line px-4 py-3">
+          <button
+            class="text-button"
+            type="button"
+            disabled={page <= 1}
+            on:click={() => goToPage(page - 1)}
+          >
+            <ChevronLeft size={15} aria-hidden="true" />
+            Назад
+          </button>
+          <span class="text-xs text-slate-600">
+            Страница {page} из {totalPages}
+          </span>
+          <button
+            class="text-button"
+            type="button"
+            disabled={page >= totalPages}
+            on:click={() => goToPage(page + 1)}
+          >
+            Вперед
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+        </div>
+      {/if}
     {/if}
   {/if}
 </section>

@@ -211,7 +211,7 @@
     </div>
   </main>
 {:else}
-  <main class="min-h-screen bg-panel">
+  <main class="min-h-screen bg-panel lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
     <WorkspaceHeader
       {organization}
       user={$session?.user ?? null}
@@ -219,8 +219,8 @@
       onLogout={logout}
     />
 
-    <div class="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-      <section class="space-y-4">
+    <div class="mx-auto grid w-full max-w-7xl gap-4 px-4 py-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_minmax(0,1fr)] lg:overflow-hidden">
+      <section class="space-y-4 lg:min-h-0 lg:overflow-auto lg:pr-1">
         <UploadPanel
           busy={uploadBusy}
           error={uploadError}
@@ -230,7 +230,7 @@
         <ProcessingPanel {progress} />
       </section>
 
-      <section class="grid min-h-[640px] gap-4 lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
+      <section class="grid gap-4 lg:min-h-0 lg:overflow-hidden lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
         <ProjectTreePanel
           {tree}
           {selectedNodeId}

@@ -30,7 +30,7 @@
   }
 </script>
 
-<section class="panel flex min-h-[360px] flex-col">
+<section class="panel flex min-h-[360px] flex-col overflow-hidden lg:min-h-0">
   <div class="border-b border-line p-4">
     <div class="mb-3 flex items-center justify-between">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-ink">
