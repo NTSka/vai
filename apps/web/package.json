@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@sveltejs/adapter-node": "^5.5.7",
     "autoprefixer": "^10.5.2",
     "postcss": "^8.5.15",
     "svelte-check": "^4.7.1",

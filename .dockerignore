@@ -1,0 +1,17 @@
+**/.env
+**/.env.*
+**/.git
+**/.github
+**/.pytest_cache
+**/.svelte-kit
+**/.venv
+**/__pycache__
+**/coverage
+**/dist
+**/node_modules
+**/playwright-report
+**/test-results
+**/*.log
+**/*.tsbuildinfo
+examples
+tmp

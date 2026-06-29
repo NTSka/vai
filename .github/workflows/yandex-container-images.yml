@@ -1,0 +1,70 @@
+name: Yandex Container Images
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: cr.yandex/${{ secrets.YC_REGISTRY_ID }}
+
+jobs:
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Yandex Container Registry
+        uses: yc-actions/yc-cr-login@v3
+        with:
+          yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/vai2-backend:${{ github.sha }}
+            ${{ env.REGISTRY }}/vai2-backend:latest
+
+      - name: Build and push worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/vai2-worker:${{ github.sha }}
+            ${{ env.REGISTRY }}/vai2-worker:latest
+
+      - name: Build and push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/vai2-web:${{ github.sha }}
+            ${{ env.REGISTRY }}/vai2-web:latest
+
+      - name: Build and push CV/OCR service
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/cv-ocr-service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/vai2-cv-ocr-service:${{ github.sha }}
+            ${{ env.REGISTRY }}/vai2-cv-ocr-service:latest

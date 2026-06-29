@@ -1,0 +1,67 @@
+services:
+  backend:
+    image: ${BACKEND_IMAGE}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 3000
+      DATABASE_URL: ${DATABASE_URL}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      CV_OCR_SERVICE_URL: cv-ocr-service:50051
+    ports:
+      - "3000:3000"
+    depends_on:
+      - cv-ocr-service
+
+  worker:
+    image: ${WORKER_IMAGE}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      WORKER_ID: ${WORKER_ID:-yc-worker-1}
+      DATABASE_URL: ${DATABASE_URL}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      CV_OCR_SERVICE_URL: cv-ocr-service:50051
+    depends_on:
+      - backend
+      - cv-ocr-service
+
+  cv-ocr-service:
+    image: ${CV_OCR_IMAGE}
+    restart: unless-stopped
+    environment:
+      CV_OCR_SERVICE_ADDRESS: "[::]:50051"
+      CV_OCR_OCR_MAX_WORKERS: ${CV_OCR_OCR_MAX_WORKERS:-4}
+      CV_OCR_TESSERACT_LANGUAGES: ${CV_OCR_TESSERACT_LANGUAGES:-rus+eng}
+      CV_OCR_TESSERACT_TIMEOUT_SECONDS: ${CV_OCR_TESSERACT_TIMEOUT_SECONDS:-30}
+      OMP_THREAD_LIMIT: ${OMP_THREAD_LIMIT:-1}
+    expose:
+      - "50051"
+
+  web:
+    image: ${WEB_IMAGE}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      PUBLIC_BACKEND_ORIGIN: http://backend:3000
+    ports:
+      - "80:3000"
+    depends_on:
+      - backend
