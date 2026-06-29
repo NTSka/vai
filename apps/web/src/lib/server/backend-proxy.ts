@@ -31,10 +31,14 @@ export function backendProxy(prefix: string): RequestHandler {
 
     const responseHeaders = new Headers();
     response.headers.forEach((value, key) => {
-      if (!hopByHopHeaders.has(key.toLowerCase())) {
+      const normalizedKey = key.toLowerCase();
+      if (!hopByHopHeaders.has(normalizedKey) && normalizedKey !== "set-cookie") {
         responseHeaders.set(key, value);
       }
     });
+    for (const cookie of getSetCookieHeaders(response.headers)) {
+      responseHeaders.append("set-cookie", cookie);
+    }
 
     return new Response(response.body, {
       status: response.status,
@@ -42,6 +46,19 @@ export function backendProxy(prefix: string): RequestHandler {
       headers: responseHeaders
     });
   };
+}
+
+function getSetCookieHeaders(headers: Headers): string[] {
+  const withGetSetCookie = headers as Headers & {
+    getSetCookie?: () => string[];
+  };
+  const setCookies = withGetSetCookie.getSetCookie?.();
+  if (setCookies && setCookies.length > 0) {
+    return setCookies;
+  }
+
+  const value = headers.get("set-cookie");
+  return value ? [value] : [];
 }
 
 function backendOrigin(): string {
