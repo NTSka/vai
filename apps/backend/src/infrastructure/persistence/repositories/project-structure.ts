@@ -43,6 +43,17 @@ export type ProjectStructureRepository = {
     readonly parentId?: string;
     readonly sourceIdentityIds: readonly string[];
   }): Promise<typeof schema.projectStructureNodes.$inferSelect>;
+  findNodeByStableLookup(input: {
+    readonly organizationId: string;
+    readonly kind: typeof schema.projectStructureNodeKind.enumValues[number];
+    readonly key: string;
+    readonly parentId?: string;
+  }): Promise<typeof schema.projectStructureNodes.$inferSelect | undefined>;
+  updateNodeTitle(input: {
+    readonly organizationId: string;
+    readonly id: string;
+    readonly title: string;
+  }): Promise<typeof schema.projectStructureNodes.$inferSelect>;
   createOrUpdatePlacement(input: {
     readonly organizationId: string;
     readonly documentId: string;
@@ -265,6 +276,67 @@ export function createProjectStructureRepository(
           parentLookupKey,
           sourceIdentityIds: [...input.sourceIdentityIds]
         })
+        .onConflictDoNothing({
+          target: [
+            schema.projectStructureNodes.organizationId,
+            schema.projectStructureNodes.kind,
+            schema.projectStructureNodes.parentLookupKey,
+            schema.projectStructureNodes.key
+          ]
+        })
+        .returning();
+
+      if (node) {
+        return node;
+      }
+
+      const [createdConcurrently] = await db
+        .select()
+        .from(schema.projectStructureNodes)
+        .where(
+          and(
+            eq(schema.projectStructureNodes.organizationId, input.organizationId),
+            eq(schema.projectStructureNodes.kind, input.kind),
+            eq(schema.projectStructureNodes.parentLookupKey, parentLookupKey),
+            eq(schema.projectStructureNodes.key, input.key)
+          )
+        )
+        .limit(1);
+
+      return requireRow(createdConcurrently, "project structure node");
+    },
+
+    async findNodeByStableLookup(input) {
+      const parentLookupKey = input.parentId ?? "root";
+      const [node] = await db
+        .select()
+        .from(schema.projectStructureNodes)
+        .where(
+          and(
+            eq(schema.projectStructureNodes.organizationId, input.organizationId),
+            eq(schema.projectStructureNodes.kind, input.kind),
+            eq(schema.projectStructureNodes.parentLookupKey, parentLookupKey),
+            eq(schema.projectStructureNodes.key, input.key)
+          )
+        )
+        .limit(1);
+
+      return node;
+    },
+
+    async updateNodeTitle(input) {
+      const [node] = await db
+        .update(schema.projectStructureNodes)
+        .set({
+          title: input.title,
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(schema.projectStructureNodes.organizationId, input.organizationId),
+            eq(schema.projectStructureNodes.id, input.id)
+          )
+        )
         .returning();
 
       return requireRow(node, "project structure node");

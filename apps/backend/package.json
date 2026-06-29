@@ -15,7 +15,7 @@
   },
   "scripts": {
     "dev": "pnpm build && node --env-file-if-exists=.env --enable-source-maps dist/server.js",
-    "worker:dev": "pnpm build && node --env-file-if-exists=.env --enable-source-maps -e \"import('./dist/worker/run-once.js').then(({ runWorkerLoop }) => runWorkerLoop({ idleDelayMs: 1000, onResult: (result) => console.log(new Date().toISOString(), result) }))\"",
+    "worker:dev": "pnpm build && node --env-file-if-exists=.env --enable-source-maps -e \"import('./dist/worker/run-once.js').then(({ runWorkerLoop }) => runWorkerLoop({ idleDelayMs: 1000, onResult: (result) => result === 'processed' && console.log(new Date().toISOString(), result) }))\"",
     "worker:once": "pnpm build && node --env-file-if-exists=.env --enable-source-maps -e \"import('./dist/worker/run-once.js').then(async ({ runWorkerOnce }) => console.log(await runWorkerOnce()))\"",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

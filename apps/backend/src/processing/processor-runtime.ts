@@ -231,6 +231,8 @@ export function createDefaultProcessorRegistry(input: {
   readonly bucket: string;
   readonly objectStorage: import("../infrastructure/object-storage/plugin.js").ObjectStorageClient;
   readonly cvOcrClient?: CvOcrClient;
+  readonly archiveUnpackUploadConcurrency?: number;
+  readonly logger?: ProcessingLogger;
   readonly persistExtractedArchiveFiles: PersistExtractedArchiveFiles;
   readonly completeAcceptedInputValidation: CompleteAcceptedInputValidation;
 }): ProcessorRegistry {
@@ -246,6 +248,10 @@ export function createDefaultProcessorRegistry(input: {
     documentIntake: input.documentIntake,
     eventing: input.eventing,
     objectStorage: input.objectStorage,
+    ...(input.archiveUnpackUploadConcurrency
+      ? { uploadConcurrency: input.archiveUnpackUploadConcurrency }
+      : {}),
+    ...(input.logger ? { logger: input.logger } : {}),
     persistExtractedArchiveFiles: input.persistExtractedArchiveFiles,
     completeAcceptedInputValidation: input.completeAcceptedInputValidation
   });

@@ -28,7 +28,9 @@ const envSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(512 * 1024 * 1024)
+    .default(512 * 1024 * 1024),
+  PROCESSING_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(8),
+  ARCHIVE_UNPACK_UPLOAD_CONCURRENCY: z.coerce.number().int().positive().default(8)
 });
 
 export type BackendConfig = {
@@ -52,6 +54,8 @@ export type BackendConfig = {
   readonly cvOcrServiceUrl: string;
   readonly cvOcrDeadlineMs: number;
   readonly cvOcrGrpcMaxMessageBytes: number;
+  readonly processingWorkerConcurrency: number;
+  readonly archiveUnpackUploadConcurrency: number;
 };
 
 export function loadBackendConfig(
@@ -92,6 +96,8 @@ export function loadBackendConfig(
         : value.AUTH_COOKIE_SECURE === "true",
     cvOcrServiceUrl: value.CV_OCR_SERVICE_URL,
     cvOcrDeadlineMs: value.CV_OCR_DEADLINE_MS,
-    cvOcrGrpcMaxMessageBytes: value.CV_OCR_GRPC_MAX_MESSAGE_BYTES
+    cvOcrGrpcMaxMessageBytes: value.CV_OCR_GRPC_MAX_MESSAGE_BYTES,
+    processingWorkerConcurrency: value.PROCESSING_WORKER_CONCURRENCY,
+    archiveUnpackUploadConcurrency: value.ARCHIVE_UNPACK_UPLOAD_CONCURRENCY
   };
 }

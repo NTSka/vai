@@ -24,6 +24,8 @@ export function createTestConfig(
     cvOcrServiceUrl: "localhost:50051",
     cvOcrDeadlineMs: 300_000,
     cvOcrGrpcMaxMessageBytes: 512 * 1024 * 1024,
+    processingWorkerConcurrency: 8,
+    archiveUnpackUploadConcurrency: 8,
     ...overrides
   };
 }

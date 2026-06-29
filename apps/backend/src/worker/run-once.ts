@@ -1,4 +1,4 @@
-import { Client } from "pg";
+import { Client, Pool } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import { loadBackendConfig } from "../config.js";
@@ -28,6 +28,7 @@ export type WorkerRunResult = "processed" | "idle";
 
 export type WorkerLoopOptions = {
   readonly idleDelayMs?: number;
+  readonly concurrency?: number;
   readonly signal?: AbortSignal;
   readonly onResult?: (result: WorkerRunResult) => void;
 };
@@ -49,7 +50,8 @@ export async function runWorkerOnce(): Promise<WorkerRunResult> {
       db,
       config.objectStorage.bucket,
       objectStorage,
-      cvOcrClient
+      cvOcrClient,
+      config.archiveUnpackUploadConcurrency
     );
 
     try {
@@ -67,40 +69,67 @@ export async function runWorkerLoop(
   options: WorkerLoopOptions = {}
 ): Promise<void> {
   const config = loadBackendConfig();
-  const client = new Client({ connectionString: config.databaseUrl });
+  const concurrency = options.concurrency ?? config.processingWorkerConcurrency;
+  const pool = new Pool({
+    connectionString: config.databaseUrl,
+    max: Math.max(concurrency + 2, 4)
+  });
   const idleDelayMs = options.idleDelayMs ?? 1000;
 
-  await client.connect();
   try {
-    const db = drizzle(client, { schema: schema.schema });
-    const objectStorage = createObjectStorageClient(config.objectStorage);
-    const cvOcrClient = createCvOcrGrpcClient({
-      address: config.cvOcrServiceUrl,
-      deadlineMs: config.cvOcrDeadlineMs,
-      maxMessageBytes: config.cvOcrGrpcMaxMessageBytes
-    });
-    const runtime = createRuntime(
-      db,
-      config.objectStorage.bucket,
-      objectStorage,
-      cvOcrClient
+    const lanes = Array.from({ length: concurrency }, (_, index) =>
+      runWorkerLane({
+        laneIndex: index,
+        pool,
+        config,
+        idleDelayMs,
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.onResult ? { onResult: options.onResult } : {})
+      })
     );
+    await Promise.all(lanes);
+  } finally {
+    await pool.end();
+  }
+}
 
-    try {
-      while (!options.signal?.aborted) {
-        const result = await runtime.runNext();
-        options.onResult?.(result);
+async function runWorkerLane(input: {
+  readonly laneIndex: number;
+  readonly pool: Pool;
+  readonly config: ReturnType<typeof loadBackendConfig>;
+  readonly idleDelayMs: number;
+  readonly signal?: AbortSignal;
+  readonly onResult?: (result: WorkerRunResult) => void;
+}): Promise<void> {
+  const db = drizzle(input.pool, { schema: schema.schema });
+  const objectStorage = createObjectStorageClient(input.config.objectStorage);
+  const cvOcrClient = createCvOcrGrpcClient({
+    address: input.config.cvOcrServiceUrl,
+    deadlineMs: input.config.cvOcrDeadlineMs,
+    maxMessageBytes: input.config.cvOcrGrpcMaxMessageBytes
+  });
+  const logger = createJsonProcessingLogger();
+  const runtime = createRuntime(
+    db,
+    input.config.objectStorage.bucket,
+    objectStorage,
+    cvOcrClient,
+    input.config.archiveUnpackUploadConcurrency,
+    logger
+  );
 
-        if (result === "idle") {
-          await sleep(idleDelayMs, options.signal);
-        }
+  try {
+    while (!input.signal?.aborted) {
+      const result = await runtime.runNext();
+      input.onResult?.(result);
+
+      if (result === "idle") {
+        await sleep(input.idleDelayMs, input.signal);
       }
-    } finally {
-      cvOcrClient.close();
-      objectStorage.destroy();
     }
   } finally {
-    await client.end();
+    cvOcrClient.close();
+    objectStorage.destroy();
   }
 }
 
@@ -108,7 +137,9 @@ function createRuntime(
   db: NodePgDatabase<typeof schema.schema>,
   bucket: string,
   objectStorage: ReturnType<typeof createObjectStorageClient>,
-  cvOcrClient: ReturnType<typeof createCvOcrGrpcClient>
+  cvOcrClient: ReturnType<typeof createCvOcrGrpcClient>,
+  archiveUnpackUploadConcurrency = 8,
+  logger = createJsonProcessingLogger()
 ): { runNext(): Promise<WorkerRunResult> } {
   const processing = createProcessingRepository(db);
   const documentIntake = createDocumentIntakeRepository(db);
@@ -132,6 +163,8 @@ function createRuntime(
     bucket,
     objectStorage,
     cvOcrClient,
+    archiveUnpackUploadConcurrency,
+    logger,
     persistExtractedArchiveFiles: async (input) =>
       db.transaction(async (tx) => {
         const intake = createDocumentIntakeRepository(tx);
@@ -179,7 +212,7 @@ function createRuntime(
   const processorRuntime = createProcessorRuntime({
     processing,
     registry,
-    logger: createJsonProcessingLogger()
+    logger
   });
 
   return {

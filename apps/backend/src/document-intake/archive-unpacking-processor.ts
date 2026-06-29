@@ -16,6 +16,7 @@ import type { ObjectStorageClient } from "../infrastructure/object-storage/plugi
 import type { DocumentIntakeRepository } from "../infrastructure/persistence/repositories/document-intake.js";
 import type { EventingRepository } from "../infrastructure/persistence/repositories/eventing.js";
 import type { ProcessingRepository } from "../infrastructure/persistence/repositories/processing-orchestration.js";
+import type { ProcessingLogger } from "../processing/telemetry.js";
 import { selectAcceptedFileIdsByParsePriority, type IntakeFileCandidate } from "./file-priority.js";
 
 const execFileAsync = promisify(execFile);
@@ -67,6 +68,8 @@ export function createArchiveUnpackingProcessor(input: {
   readonly documentIntake: DocumentIntakeRepository;
   readonly eventing: EventingRepository;
   readonly objectStorage: ObjectStorageClient;
+  readonly uploadConcurrency?: number;
+  readonly logger?: ProcessingLogger;
   readonly persistExtractedArchiveFiles: PersistExtractedArchiveFiles;
   readonly completeAcceptedInputValidation: CompleteAcceptedInputValidation;
 }): ArchiveUnpackingProcessor {
@@ -149,6 +152,8 @@ export function createArchiveUnpackingProcessor(input: {
                 archive: storedFile,
                 archiveExtension: extension,
                 objectStorage: input.objectStorage,
+                uploadConcurrency: input.uploadConcurrency ?? 8,
+                ...(input.logger ? { logger: input.logger } : {}),
                 persistExtractedArchiveFiles: input.persistExtractedArchiveFiles
               }))
             );
@@ -209,6 +214,8 @@ async function unpackArchive(input: {
     readonly storage: { provider: "local" | "s3" | "s3_compatible"; bucket?: string; key: string };
   };
   readonly objectStorage: ObjectStorageClient;
+  readonly uploadConcurrency: number;
+  readonly logger?: ProcessingLogger;
   readonly persistExtractedArchiveFiles: PersistExtractedArchiveFiles;
 }): Promise<IntakeFileCandidate[]> {
   const tempRoot = path.join(tmpdir(), "vai2-archive-unpacking", randomUUID());
@@ -219,82 +226,107 @@ async function unpackArchive(input: {
   await mkdir(extractDirectory, { recursive: true });
 
   try {
-    const archiveStream = await input.objectStorage.getObject({
-      bucket: sourceBucket,
-      key: input.archive.storage.key
+    await measureArchiveStage(input, "download", async () => {
+      const archiveStream = await input.objectStorage.getObject({
+        bucket: sourceBucket,
+        key: input.archive.storage.key
+      });
+      await pipeline(archiveStream, createWriteStream(archiveTempPath, { flags: "wx" }));
     });
-    await pipeline(archiveStream, createWriteStream(archiveTempPath, { flags: "wx" }));
 
     let entriesForPersisting: ArchiveEntry[];
     if (input.archiveExtension === ".rar") {
-      const entries = await inspectRar({
-        archivePath: archiveTempPath
-      });
+      const entries = await measureArchiveStage(input, "inspect", () =>
+        inspectRar({
+          archivePath: archiveTempPath
+        })
+      );
       entriesForPersisting = entries;
       validateArchiveEntries(entries);
-      await extractRar({
-        archivePath: archiveTempPath,
-        extractDirectory
-      });
+      await measureArchiveStage(input, "extract", () =>
+        extractRar({
+          archivePath: archiveTempPath,
+          extractDirectory
+        })
+      );
     } else {
-      const entries = await inspectWith7Zip({
-        archivePath: archiveTempPath
-      });
+      const entries = await measureArchiveStage(input, "inspect", () =>
+        inspectWith7Zip({
+          archivePath: archiveTempPath
+        })
+      );
       entriesForPersisting = entries;
       validateArchiveEntries(entries);
-      await extractWith7Zip({
-        archivePath: archiveTempPath,
-        extractDirectory
-      });
+      await measureArchiveStage(input, "extract", () =>
+        extractWith7Zip({
+          archivePath: archiveTempPath,
+          extractDirectory
+        })
+      );
     }
 
-    const extractedFiles = matchExtractedFilesToArchiveEntries(
-      await listExtractedFiles(extractDirectory),
-      entriesForPersisting
+    const extractedFiles = await measureArchiveStage(input, "scan_extracted_files", async () =>
+      matchExtractedFilesToArchiveEntries(
+        await listExtractedFiles(extractDirectory),
+        entriesForPersisting
+      )
     );
 
     const uploadedObjects: string[] = [];
-    const extractedFacts: PersistExtractedArchiveFileInput[] = [];
-    for (const extractedFile of extractedFiles) {
-      const extension = normalizeExtension(path.extname(extractedFile.archiveRelativePath));
-      if (!isSupportedExtractedExtension(extension)) {
-        continue;
-      }
+    const supportedExtractedFiles = extractedFiles
+      .map((extractedFile) => ({
+        extractedFile,
+        extension: normalizeExtension(path.extname(extractedFile.archiveRelativePath))
+      }))
+      .filter(
+        (entry): entry is {
+          readonly extractedFile: typeof extractedFiles[number];
+          readonly extension: ".pdf" | ".xlsx" | ".xls";
+        } => isSupportedExtractedExtension(entry.extension)
+      );
+    const extractedFacts = await measureArchiveStage(input, "hash_upload", () =>
+      mapWithConcurrency(
+        supportedExtractedFiles,
+        Math.max(1, input.uploadConcurrency),
+        async ({ extractedFile, extension }) => {
+          const fileFacts = await hashFile(extractedFile.absolutePath);
+          const storageKey = [
+            "organizations",
+            input.organizationId,
+            "archive-extractions",
+            randomUUID(),
+            path.basename(extractedFile.archiveRelativePath)
+          ].join("/");
 
-      const fileFacts = await hashFile(extractedFile.absolutePath);
-      const storageKey = [
-        "organizations",
-        input.organizationId,
-        "archive-extractions",
-        randomUUID(),
-        path.basename(extractedFile.archiveRelativePath)
-      ].join("/");
+          await input.objectStorage.putObject({
+            bucket: input.bucket,
+            key: storageKey,
+            body: createReadStream(extractedFile.absolutePath),
+            contentLength: fileFacts.sizeBytes
+          });
+          uploadedObjects.push(storageKey);
 
-      await input.objectStorage.putObject({
-        bucket: input.bucket,
-        key: storageKey,
-        body: createReadStream(extractedFile.absolutePath),
-        contentLength: fileFacts.sizeBytes
-      });
-      uploadedObjects.push(storageKey);
-
-      extractedFacts.push({
-        originalName: path.basename(extractedFile.archiveRelativePath),
-        extension,
-        sizeBytes: fileFacts.sizeBytes,
-        checksum: fileFacts.checksum,
-        storageKey,
-        pathInSource: extractedFile.archiveRelativePath
-      });
-    }
+          return {
+            originalName: path.basename(extractedFile.archiveRelativePath),
+            extension,
+            sizeBytes: fileFacts.sizeBytes,
+            checksum: fileFacts.checksum,
+            storageKey,
+            pathInSource: extractedFile.archiveRelativePath
+          };
+        }
+      )
+    );
 
     try {
-      const extractedFileIds = await input.persistExtractedArchiveFiles({
-        organizationId: input.organizationId,
-        documentSetId: input.documentSetId,
-        sourceFileId: input.archive.id,
-        files: extractedFacts
-      });
+      const extractedFileIds = await measureArchiveStage(input, "persist", () =>
+        input.persistExtractedArchiveFiles({
+          organizationId: input.organizationId,
+          documentSetId: input.documentSetId,
+          sourceFileId: input.archive.id,
+          files: extractedFacts
+        })
+      );
       return extractedFacts.map((file, index) => ({
         id: extractedFileIds[index] ?? "",
         originalName: file.originalName,
@@ -326,10 +358,82 @@ async function extractWith7Zip(input: {
     input.archivePath,
     `-o${input.extractDirectory}`,
     "-y",
+    "-mmt=on",
     "-bd",
     "-bso0",
     "-bsp0"
   ], { maxBuffer: sevenZipMaxOutputBufferBytes });
+}
+
+async function measureArchiveStage<T>(
+  input: {
+    readonly organizationId: string;
+    readonly documentSetId: string;
+    readonly archive: { readonly id: string; readonly originalName: string };
+    readonly logger?: ProcessingLogger;
+  },
+  stage: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const startedAtMs = Date.now();
+  try {
+    const result = await operation();
+    input.logger?.info(
+      {
+        event: "archive.unpacking.stage",
+        status: "completed",
+        stage,
+        organizationId: input.organizationId,
+        documentSetId: input.documentSetId,
+        archiveFileId: input.archive.id,
+        archiveName: input.archive.originalName,
+        durationMs: Date.now() - startedAtMs
+      },
+      "archive unpacking stage completed"
+    );
+    return result;
+  } catch (error) {
+    input.logger?.error(
+      {
+        event: "archive.unpacking.stage",
+        status: "failed",
+        stage,
+        organizationId: input.organizationId,
+        documentSetId: input.documentSetId,
+        archiveFileId: input.archive.id,
+        archiveName: input.archive.originalName,
+        durationMs: Date.now() - startedAtMs,
+        errorMessage: error instanceof Error ? error.message : "Archive stage failed"
+      },
+      "archive unpacking stage failed"
+    );
+    throw error;
+  }
+}
+
+async function mapWithConcurrency<TInput, TOutput>(
+  items: readonly TInput[],
+  concurrency: number,
+  mapper: (item: TInput, index: number) => Promise<TOutput>
+): Promise<TOutput[]> {
+  const results: TOutput[] = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) {
+          return;
+        }
+        results[index] = await mapper(items[index] as TInput, index);
+      }
+    }
+  );
+
+  await Promise.all(workers);
+  return results;
 }
 
 async function inspectWith7Zip(input: {
