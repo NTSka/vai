@@ -11,6 +11,7 @@
     Move,
     Plus
   } from "@lucide/svelte";
+  import * as XLSX from "xlsx";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { api, ApiError } from "$lib/api/client";
@@ -39,6 +40,7 @@
   let metadata: SourceDocumentMetadata | null = null;
   let viewer: SourceDocumentViewer | null = null;
   let errorMessage = "";
+  let previewError = "";
   let loading = true;
   let selectedSheet = "";
   let pdfZoom = 1;
@@ -85,7 +87,7 @@
         })
       ]);
       metadata = nextMetadata;
-      viewer = nextViewer;
+      viewer = await withClientSpreadsheetFallback(nextMetadata, nextViewer);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         await goto("/login");
@@ -207,6 +209,137 @@
         })
       }))
     };
+  }
+
+  async function withClientSpreadsheetFallback(
+    nextMetadata: SourceDocumentMetadata,
+    nextViewer: SourceDocumentViewer
+  ): Promise<SourceDocumentViewer> {
+    if (
+      nextViewer.viewer !== "fallback" ||
+      nextMetadata.sourceFile.extension?.toLowerCase() !== ".xls"
+    ) {
+      return nextViewer;
+    }
+
+    try {
+      const response = await fetch(nextViewer.downloadUrl, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`Source download failed with ${response.status}`);
+      }
+      const workbook = XLSX.read(await response.arrayBuffer(), {
+        type: "array",
+        cellDates: true
+      });
+      return xlsWorkbookToViewer(nextViewer, workbook);
+    } catch {
+      previewError = "Не удалось построить предпросмотр XLS. Оригинал можно скачать.";
+      return nextViewer;
+    }
+  }
+
+  function xlsWorkbookToViewer(
+    fallback: Extract<SourceDocumentViewer, { viewer: "fallback" }>,
+    workbook: XLSX.WorkBook
+  ): XlsxViewer {
+    return {
+      viewer: "xlsx",
+      organizationId: fallback.organizationId,
+      documentVersionId: fallback.documentVersionId,
+      sourceFileName: fallback.sourceFileName,
+      downloadUrl: fallback.downloadUrl,
+      sheets: workbook.SheetNames.map((name) => xlsSheetToViewerSheet(name, workbook.Sheets[name])),
+      cells: workbook.SheetNames.flatMap((name) =>
+        xlsSheetToViewerCells(name, workbook.Sheets[name])
+      )
+    };
+  }
+
+  function xlsSheetToViewerSheet(name: string, worksheet: XLSX.WorkSheet | undefined): XlsxSheet {
+    const range = XLSX.utils.decode_range(worksheet?.["!ref"] ?? "A1:A1");
+    const columnCount = range.e.c + 1;
+    const rowCount = range.e.r + 1;
+    return {
+      name,
+      rowCount,
+      columnCount,
+      columns: Array.from({ length: columnCount }, (_, index) => {
+        const column = worksheet?.["!cols"]?.[index];
+        return {
+          index: index + 1,
+          widthPx: Math.max(32, Math.round(column?.wpx ?? ((column?.wch ?? 8.43) * 7 + 5))),
+          hidden: column?.hidden === true
+        };
+      }),
+      rows: Array.from({ length: rowCount }, (_, index) => {
+        const row = worksheet?.["!rows"]?.[index];
+        return {
+          index: index + 1,
+          heightPx: Math.max(18, Math.round(row?.hpx ?? (((row?.hpt ?? 15) * 96) / 72))),
+          hidden: row?.hidden === true
+        };
+      }),
+      merges: (worksheet?.["!merges"] ?? []).map((merge) => ({
+        range: XLSX.utils.encode_range(merge),
+        startRow: merge.s.r + 1,
+        startColumn: merge.s.c + 1,
+        endRow: merge.e.r + 1,
+        endColumn: merge.e.c + 1,
+        rowSpan: merge.e.r - merge.s.r + 1,
+        columnSpan: merge.e.c - merge.s.c + 1
+      }))
+    };
+  }
+
+  function xlsSheetToViewerCells(
+    sheetName: string,
+    worksheet: XLSX.WorkSheet | undefined
+  ): XlsxCell[] {
+    if (!worksheet) {
+      return [];
+    }
+    return Object.entries(worksheet).flatMap(([cellAddress, cell]) => {
+      if (cellAddress.startsWith("!")) {
+        return [];
+      }
+      const parsed = XLSX.utils.decode_cell(cellAddress);
+      return [
+        {
+          sheetName,
+          cellAddress,
+          rowNumber: parsed.r + 1,
+          columnNumber: parsed.c + 1,
+          value: formatSheetCell(cell),
+          valueType: sheetCellValueType(cell)
+        }
+      ];
+    });
+  }
+
+  function formatSheetCell(cell: XLSX.CellObject): string {
+    if (cell.w !== undefined) {
+      return String(cell.w);
+    }
+    if (cell.v === null || cell.v === undefined) {
+      return "";
+    }
+    if (cell.v instanceof Date) {
+      return cell.v.toISOString();
+    }
+    return String(cell.v);
+  }
+
+  function sheetCellValueType(cell: XLSX.CellObject): string {
+    const labels: Record<string, string> = {
+      b: "boolean",
+      d: "date",
+      e: "error",
+      n: "number",
+      s: "string",
+      str: "string",
+      z: "blank"
+    };
+    return labels[cell.t ?? "z"] ?? "string";
   }
 
   function range(count: number) {
@@ -331,6 +464,11 @@
           Скачать
         </a>
       </div>
+      {#if previewError}
+        <p class="mb-4 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {previewError}
+        </p>
+      {/if}
 
       {#if viewer.viewer === "pdf"}
         <section class="panel overflow-hidden">
