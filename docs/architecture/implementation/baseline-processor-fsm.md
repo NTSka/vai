@@ -76,8 +76,11 @@ Baseline processors:
 - PDF layout detector;
 - PDF OCR candidate planner;
 - PDF targeted OCR processor;
+- PDF source field extractor;
+- PDF stamp-first probe;
 - PDF table reconstructor;
 - XLSX cell extractor;
+- GOST title block interpreter;
 - document type resolver;
 - typed data extractor;
 - document identity resolver;
@@ -347,6 +350,82 @@ Output facts:
 The processor should use the PDF text layer first when available and invoke OCR
 only for unresolved candidates.
 
+### PDF Source Field Extractor
+
+Owner domain: Content.
+
+Input:
+
+- recognized OCR/text-layer results;
+- source OCR candidates;
+- layout regions;
+- optional table geometry or cell artifacts.
+
+FSM:
+
+```text
+pending
+  -> queued
+  -> running
+  -> completed: source-field artifacts are persisted
+  -> failed: source-field extraction failed
+```
+
+Output facts:
+
+- `source_field` content artifacts;
+- source artifact links, candidate identifiers, locations, confidence, and
+  extraction status;
+- `content.extracted` event for full extraction;
+- `content.probed` event only when source-field extraction is the final step of
+  a bounded early probe.
+
+The processor may extract fields such as PDF stamp cells, table cells, header
+regions, or XLSX cell-backed fields. It must not parse standardized document
+codes, assign own/reference-code roles, classify document family, or produce
+typed document facts.
+
+Stamp/header source-field extraction can run before table reconstruction.
+Table-backed source-field extraction requires reconstructed table/cell
+artifacts and therefore runs after table reconstruction.
+
+### PDF Stamp-First Probe
+
+Owner domain: Content.
+
+Input:
+
+- rendered PDF page artifacts;
+- optional PDF text layer artifacts.
+
+FSM:
+
+```text
+pending
+  -> queued
+  -> running
+  -> completed: layout, stamp candidates, stamp OCR/text, and stamp source
+     fields are persisted
+  -> failed: probe cannot produce a content outcome
+```
+
+Output facts:
+
+- layout region artifacts needed to locate stamp/title-block candidates;
+- stamp-cell OCR candidate artifacts;
+- stamp-cell OCR text artifacts;
+- stamp source-field artifacts;
+- `content.probed` event.
+
+The probe is a bounded content pass used for early semantic routing. It should
+prefer PDF text-layer words per stamp cell and invoke OCR only for unresolved
+stamp-cell candidates. It must not perform full table OCR or full-page OCR by
+default.
+
+The probe reuses the normal content operations with a stamp-only scope:
+`pdf_layout_detection`, `pdf_ocr_candidate_planning`,
+`pdf_targeted_ocr`, and `pdf_source_field_extraction`.
+
 ### PDF Table Reconstructor
 
 Owner domain: Content.
@@ -408,6 +487,8 @@ Owner domain: Document Type Resolution.
 Input:
 
 - content artifacts;
+- source-field artifacts;
+- title-block semantic evidence when available;
 - technical file format hints.
 
 FSM:
@@ -429,6 +510,50 @@ Output facts:
 Uncertain, unknown, and unsupported resolutions should be successful domain
 outputs when the resolver can classify that state. They should not be modeled
 as job failures unless the processor itself failed.
+
+For PDF documents, the resolver should normally run after
+`title_block.interpreted`, which is triggered by `content.probed`. If the title
+block interpreter produces a missing or ambiguous outcome, the resolver still
+completes with an explicit uncertain or unknown resolution rather than waiting
+for full OCR/table extraction by default. It should treat stamp/title-block
+evidence as routing evidence, not as a final parsed document identity.
+
+Title-block routing evidence is not limited to field 1/document designation.
+Some supported forms, such as short specification title blocks, may not expose a
+document-designation field. A recognized GOST form with stage, sheet title, or
+product/document-name evidence is enough to route preliminary processing to the
+drawing-document family with lower confidence than a parsed designation.
+
+### GOST Title Block Interpreter
+
+Owner domain: Document Semantics / GOST Title Block.
+
+Input:
+
+- content source fields from stamp/title-block cells;
+- layout/source provenance needed to understand the title-block form.
+
+FSM:
+
+```text
+pending
+  -> queued
+  -> running
+  -> completed: title-block semantic evidence is persisted
+  -> failed: interpreter cannot produce a semantic outcome
+```
+
+Output facts:
+
+- title-block semantic evidence;
+- warnings for missing, ambiguous, invalid, or low-confidence fields;
+- source links to content artifacts;
+- `title_block.interpreted` event.
+
+The interpreter maps source fields to semantic concepts such as document
+designation, documentation stage, sheet title, sheet number, and revision. It
+does not run OCR, reconstruct tables, parse final document identities, enqueue
+downstream jobs, or update project structure.
 
 ### Typed Data Extractor
 

@@ -18,8 +18,14 @@ capability results.
 - Full-page OCR is not a default strategy.
 - The domain should produce raw or semi-structured content artifacts, not
   document-code candidates, parsed document codes, or business data.
-- Typed document data extracts document-type-specific source fields. Document
-  identity decides how to interpret those fields as own or reference codes.
+- Content may produce source-field artifacts when a value can be tied to a
+  concrete document location, such as a PDF stamp cell, PDF table cell, XLSX
+  cell, or header region. Source fields are still content facts: they preserve
+  raw text, provenance, location, confidence, and extraction status, but do not
+  decide whether a value is an own code, reference code, document type, or
+  business fact.
+- Document semantics interprets source fields into title-block facts, typed
+  document data, document type evidence, and identity inputs.
 - XLSX content processing exposes workbook cells as content artifacts. It does
   not detect estimate table ranges; that belongs to typed estimate processing.
 
@@ -60,6 +66,7 @@ type ContentOperation =
   | "pdf_layout_detection"
   | "pdf_ocr_candidate_planning"
   | "pdf_targeted_ocr"
+  | "pdf_source_field_extraction"
   | "pdf_table_reconstruction"
   | "xlsx_cell_extraction";
 ```
@@ -75,6 +82,12 @@ PDF content processing should be decomposed into jobs by stable outputs:
 - `pdf_targeted_ocr`: recognizes OCR candidates. It should use the PDF text
   layer first when available and call an OCR engine only for unresolved
   candidates.
+- `pdf_source_field_extraction`: projects recognized text and known layout
+  structure into source fields. Stamp/header source fields may be extracted
+  before table reconstruction; table-backed source fields require reconstructed
+  table/cell artifacts and run after `pdf_table_reconstruction`. Source-field
+  extraction does not assign identity roles or parse standardized document
+  codes.
 - `pdf_table_reconstruction`: reconstructs tables from table-cell candidates,
   OCR text, and detected grid geometry.
 
@@ -92,8 +105,26 @@ pdf_page_rendering
   -> pdf_layout_detection
   -> pdf_ocr_candidate_planning
   -> pdf_targeted_ocr
+  -> pdf_source_field_extraction (stamp/header scope)
   -> pdf_table_reconstruction
+  -> pdf_source_field_extraction (table scope)
 ```
+
+PDF stamp-first probe:
+
+```text
+pdf_page_rendering
+  -> pdf_text_layer_extraction
+  -> pdf_layout_detection
+  -> pdf_ocr_candidate_planning (stamp-only scope)
+  -> pdf_targeted_ocr (stamp-only scope)
+  -> pdf_source_field_extraction (stamp-only scope)
+  -> content.probed
+```
+
+The stamp-first probe is a content optimization boundary. It produces enough
+located source fields for early semantic routing without requiring table OCR or
+full document OCR.
 
 PDF text-layer dependency:
 
@@ -152,6 +183,7 @@ type ContentArtifactKind =
   | "region"
   | "table"
   | "cell"
+  | "source_field"
   | "ocr_candidate"
   | "ocr_text";
 ```
@@ -169,6 +201,7 @@ type ContentArtifactPayload =
   | RegionContentPayload
   | TableContentPayload
   | CellContentPayload
+  | SourceFieldPayload
   | OcrCandidatePayload
   | OcrTextPayload;
 ```
@@ -239,6 +272,95 @@ interface CellContentPayload {
 ```
 
 ```ts
+interface SourceFieldPayload {
+  fieldKey: string;
+  rawText?: string;
+  normalizedText?: string;
+  sourceKind: SourceFieldSourceKind;
+  semanticHint?: SourceFieldSemanticHint;
+  sourceArtifactIds: ContentArtifactID[];
+  sourceCandidateId?: ContentArtifactID;
+  location?: ContentLocation;
+  confidence?: number;
+  extractionStatus: "extracted" | "missing" | "ambiguous" | "invalid";
+  warnings?: ContentWarning[];
+}
+```
+
+`fieldKey` is an extractor-local stable key. Consumers must not infer domain
+meaning from arbitrary key strings alone. When the field comes from a known
+standardized structure, `semanticHint` preserves the structural context needed
+by semantic interpreters.
+
+```ts
+type SourceFieldSemanticHint =
+  | GostTitleBlockSourceHint
+  | TableSourceHint;
+```
+
+```ts
+interface GostTitleBlockSourceHint {
+  kind: "gost_title_block";
+  standard?: "gost-r-21.101" | "spds" | string;
+  form?: GostTitleBlockForm;
+  templateId?: string;
+  templateScore?: number;
+  fieldNumber?: number;
+  fieldRole?:
+    | "document_designation"
+    | "construction_object_name"
+    | "building_or_structure_name"
+    | "sheet_title"
+    | "product_or_document_name"
+    | "documentation_stage"
+    | "sheet_number"
+    | "revision"
+    | "signature"
+    | "unknown";
+  rowIndex?: number;
+  columnIndex?: number;
+  cellRole?: string;
+}
+```
+
+```ts
+type GostTitleBlockForm =
+  | "form3"
+  | "form5"
+  | "specification_short"
+  | "revision_wide"
+  | "unknown"
+  | string;
+```
+
+```ts
+interface TableSourceHint {
+  kind: "table";
+  tableId?: ContentArtifactID;
+  rowIndex?: number;
+  columnIndex?: number;
+  columnRole?: string;
+}
+```
+
+```ts
+type SourceFieldSourceKind =
+  | "pdf_stamp_cell"
+  | "pdf_table_cell"
+  | "pdf_text_region"
+  | "xlsx_cell"
+  | "filename";
+```
+
+```ts
+interface ContentWarning {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+}
+```
+
+```ts
 interface OcrCandidatePayload {
   targetKind?: OcrTargetKind;
   sourceArtifactIds: ContentArtifactID[];
@@ -303,6 +425,8 @@ interface BoundingBox {
 - Producing document-code candidates.
 - Parsing standardized document codes.
 - Determining final document purpose from a code.
+- Interpreting a PDF stamp/title-block field as an own designation, stage,
+  mark, revision, or document-family signal.
 - Project-structure placement.
 - Typed estimate, drawing, or specification data models.
 - Business comparisons and checks.

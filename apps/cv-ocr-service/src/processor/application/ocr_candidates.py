@@ -271,6 +271,7 @@ GOST_STAMP_TEMPLATE_DEFINITIONS: tuple[GOSTStampTemplateDefinition, ...] = (
             "bottom_edge": (0.94, 1.01),
         },
         field_specs=(
+            ("document_designation", "title_left", "top_edge", "right_edge", "header_bottom"),
             ("project_name", "title_left", "header_bottom", "title_split", "body_top"),
             ("stage_value", "title_split", "value_top", "stage_split", "body_top"),
             ("sheet_number", "stage_split", "value_top", "sheet_split", "body_top"),

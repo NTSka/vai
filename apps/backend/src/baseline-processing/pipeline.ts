@@ -6,6 +6,8 @@ import { z } from "zod";
 import type {
   CorrelationId,
   DocumentVersionId,
+  OcrCandidate,
+  OcrText,
   PdfRenderedPage,
   PdfTextLayerResult,
   StoredFileId,
@@ -102,15 +104,21 @@ export function registerBaselineOrchestrators(input: {
     processorId: "file_technical_placeholder",
     jobType: "file_technical_placeholder"
   });
-  registerVersionToJob(input, "content-placeholder", "file_technical.completed", {
-    processorId: "content_placeholder",
-    jobType: "content_placeholder"
+  registerVersionToJob(input, "content-probe", "file_technical.completed", {
+    processorId: "content_probe",
+    jobType: "content_probe"
   });
-  registerVersionToJob(input, "document-type-resolver", "content.extracted", {
+  registerVersionToJob(input, "gost-title-block-interpreter", "content.probed", {
+    processorId: "gost_title_block_interpreter",
+    jobType: "gost_title_block_interpretation"
+  });
+  registerVersionToJob(input, "document-type-resolver", "title_block.interpreted", {
     processorId: "document_type_resolver",
     jobType: "document_type_resolution"
   });
-  registerVersionToJob(input, "typed-data-extractor", "document_type.resolved", {
+  // Full content extraction is intentionally disabled while the pipeline is
+  // being validated through stamp probing and document type resolution.
+  registerVersionToJob(input, "typed-data-extractor", "content.extracted", {
     processorId: "typed_data_extractor",
     jobType: "typed_data_extraction"
   });
@@ -163,6 +171,16 @@ export function registerBaselineProcessors(input: {
     processorId: "file_technical_placeholder",
     jobType: "file_technical_placeholder",
     handler: (job) => executeFileTechnicalPlaceholder(input, job)
+  });
+  input.registry.register({
+    processorId: "content_probe",
+    jobType: "content_probe",
+    handler: (job) => executeContentProbe(input, job)
+  });
+  input.registry.register({
+    processorId: "gost_title_block_interpreter",
+    jobType: "gost_title_block_interpretation",
+    handler: (job) => executeGostTitleBlockInterpretation(input, job)
   });
   input.registry.register({
     processorId: "content_placeholder",
@@ -491,6 +509,95 @@ async function executeFileTechnicalPlaceholder(
   ]);
 }
 
+async function executeContentProbe(
+  input: {
+    readonly processing: ProcessingRepository;
+    readonly baselineFacts: BaselineFactsRepository;
+    readonly eventing: EventingRepository;
+    readonly objectStorage?: ObjectStorageClient;
+    readonly cvOcrClient?: CvOcrClient;
+  },
+  job: ProcessingJob
+): Promise<void> {
+  const payload = parseJobPayload(documentVersionPayloadSchema, job);
+  const detection = await input.baselineFacts.findFileFormatDetection({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+
+  if (detection?.format === "pdf") {
+    if (!input.objectStorage) {
+      await failJob(input.processing, job, "object_storage_required", payload);
+      return;
+    }
+    if (!input.cvOcrClient) {
+      await failJob(input.processing, job, "cv_ocr_client_required", payload);
+      return;
+    }
+
+    await persistPdfStampProbeOutputs({
+      baselineFacts: input.baselineFacts,
+      objectStorage: input.objectStorage,
+      cvOcrClient: input.cvOcrClient,
+      job,
+      payload
+    });
+  } else {
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: job.organizationId,
+      documentVersionId: payload.documentVersionId,
+      artifactType: "content_probe",
+      payload: {
+        schema: { id: "content_probe", version: "1.0.0" },
+        status: "not_applicable",
+        format: detection?.format ?? "unknown",
+        diagnostics: [
+          {
+            code: "content_probe_not_applicable",
+            message: "No early content probe is defined for this file format.",
+            severity: "info"
+          }
+        ]
+      },
+      producedByJobId: job.id
+    });
+  }
+
+  await completeJobAndPublishEvents(input.processing, job, [
+    buildVersionEvent(job, "content.probed", payload)
+  ]);
+}
+
+async function executeGostTitleBlockInterpretation(
+  input: {
+    readonly processing: ProcessingRepository;
+    readonly baselineFacts: BaselineFactsRepository;
+    readonly eventing: EventingRepository;
+  },
+  job: ProcessingJob
+): Promise<void> {
+  const payload = parseJobPayload(documentVersionPayloadSchema, job);
+  const sourceFieldsArtifact = await input.baselineFacts.findContentArtifact({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId,
+    artifactType: "pdf_stamp_source_fields"
+  });
+  const interpretation = buildGostTitleBlockInterpretation(sourceFieldsArtifact);
+
+  await input.baselineFacts.upsertTitleBlockInterpretation({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId,
+    status: interpretation.status,
+    evidence: interpretation.evidence,
+    warnings: interpretation.warnings,
+    sourceContentArtifactIds: sourceFieldsArtifact ? [sourceFieldsArtifact.id] : [],
+    producedByJobId: job.id
+  });
+  await completeJobAndPublishEvents(input.processing, job, [
+    buildVersionEvent(job, "title_block.interpreted", payload)
+  ]);
+}
+
 async function executeContentPlaceholder(
   input: {
     readonly processing: ProcessingRepository;
@@ -622,12 +729,23 @@ async function executeDocumentTypeResolution(
     return;
   }
 
-  const family = inferSemanticFamily(storedFile.originalName);
+  const titleBlock = await input.baselineFacts.findTitleBlockInterpretation({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
+  const titleBlockRouting = titleBlockRoutingEvidence(titleBlock?.evidence, titleBlock?.status);
+  const family = titleBlockRouting
+    ? "drawing"
+    : inferSemanticFamily(storedFile.originalName);
   await input.baselineFacts.upsertDocumentTypeResolution({
     organizationId: job.organizationId,
     documentVersionId: payload.documentVersionId,
     family,
-    confidence: family === "unknown" ? "low" : "semantic_baseline",
+    confidence: titleBlockRouting
+      ? titleBlockRouting.confidence
+      : family === "unknown"
+        ? "low"
+        : "semantic_baseline",
     alternatives: family === "unknown" ? ["drawing", "estimate", "statement"] : [],
     producedByJobId: job.id
   });
@@ -1249,6 +1367,130 @@ async function persistPdfContentOutputs(input: {
   }
 }
 
+async function persistPdfStampProbeOutputs(input: {
+  readonly baselineFacts: BaselineFactsRepository;
+  readonly objectStorage: ObjectStorageClient;
+  readonly cvOcrClient: CvOcrClient;
+  readonly job: ProcessingJob;
+  readonly payload: z.infer<typeof documentVersionPayloadSchema>;
+}): Promise<void> {
+  const [renderedArtifact, textLayerArtifact] = await Promise.all([
+    input.baselineFacts.findContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_rendered_pages"
+    }),
+    input.baselineFacts.findContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_text_layer"
+    })
+  ]);
+
+  if (!renderedArtifact) {
+    throw new ProcessorExecutionError({
+      code: "pdf_rendered_pages_missing",
+      message: "PDF rendered pages artifact is required for content probing",
+      retryable: false,
+      details: { documentVersionId: input.payload.documentVersionId }
+    });
+  }
+
+  const renderedPages = await loadRenderedPdfPagesFromArtifact({
+    objectStorage: input.objectStorage,
+    artifactPayload: renderedArtifact.payload
+  });
+  const textPages = readPdfTextPagesFromArtifact(textLayerArtifact?.payload);
+
+  try {
+    const layout = await input.cvOcrClient.detectPdfLayout({
+      renderedPages,
+      textPages
+    });
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_layout",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_layout", version: "1.0.0" },
+        adapter: layout.adapter,
+        regions: layout.regions,
+        diagnostics: layout.diagnostics,
+        extractionScope: "stamp_probe"
+      },
+      producedByJobId: input.job.id
+    });
+
+    const planned = await input.cvOcrClient.planPdfOcrCandidates({
+      regions: layout.regions,
+      renderedPages
+    });
+    const stampCandidates = planned.candidates.filter((candidate) => candidate.targetKind === "stamp_field");
+    const candidateArtifact = await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_stamp_ocr_candidates",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_stamp_ocr_candidates", version: "1.0.0" },
+        adapter: planned.adapter,
+        candidates: stampCandidates,
+        diagnostics: planned.diagnostics,
+        extractionScope: "stamp_probe"
+      },
+      producedByJobId: input.job.id
+    });
+
+    const ocrText = stampCandidates.length
+      ? await input.cvOcrClient.runPdfTargetedOcr({
+          renderedPages,
+          candidates: stampCandidates,
+          textPages
+        })
+      : {
+          adapter: planned.adapter,
+          texts: [],
+          diagnostics: [
+            {
+              code: "pdf_stamp_ocr_skipped_no_candidates",
+              message: "No stamp OCR candidates were planned for the PDF probe.",
+              severity: "info",
+              metadata: {}
+            }
+          ]
+        };
+    const textArtifact = await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_stamp_ocr_text",
+      payload: {
+        format: "pdf",
+        schema: { id: "pdf_stamp_ocr_text", version: "1.0.0" },
+        adapter: ocrText.adapter,
+        texts: ocrText.texts,
+        diagnostics: ocrText.diagnostics,
+        extractionScope: "stamp_probe"
+      },
+      producedByJobId: input.job.id
+    });
+
+    await input.baselineFacts.upsertContentArtifact({
+      organizationId: input.job.organizationId,
+      documentVersionId: input.payload.documentVersionId,
+      artifactType: "pdf_stamp_source_fields",
+      payload: buildPdfStampSourceFieldsPayload({
+        candidates: stampCandidates,
+        texts: ocrText.texts,
+        sourceArtifactIds: [candidateArtifact.id, textArtifact.id]
+      }),
+      producedByJobId: input.job.id
+    });
+  } catch (error) {
+    throw classifyPdfTechnicalError(error);
+  }
+}
+
 async function persistFailedXlsxTechnicalOutcome(
   input: {
     readonly processing: ProcessingRepository;
@@ -1571,6 +1813,226 @@ function readPdfTextPagesFromArtifact(
   return Array.isArray(pages) ? (pages as PdfTextLayerResult["pages"]) : [];
 }
 
+function buildPdfStampSourceFieldsPayload(input: {
+  readonly candidates: readonly OcrCandidate[];
+  readonly texts: readonly OcrText[];
+  readonly sourceArtifactIds: readonly string[];
+}): Record<string, unknown> {
+  const textsByCandidateId = new Map(input.texts.map((text) => [text.sourceCandidateId, text]));
+  const fields = input.candidates.map((candidate) => {
+    const metadata = parseJsonObject(candidate.metadataJson);
+    const fieldKey = readString(metadata["gostField"]) ?? candidate.expectedValueKind ?? candidate.localId;
+    const form = readString(metadata["gostForm"]) ?? "unknown";
+    const fieldMapping = gostTitleBlockFieldMapping(form, fieldKey);
+    const text = textsByCandidateId.get(candidate.localId);
+    const rawText = text?.text.trim();
+    return {
+      fieldKey,
+      ...(rawText ? { rawText, normalizedText: normalizeSourceFieldText(rawText) } : {}),
+      sourceKind: "pdf_stamp_cell",
+      semanticHint: {
+        kind: "gost_title_block",
+        standard: "gost-r-21.101",
+        form,
+        templateId: readString(metadata["gostTemplateId"]),
+        templateScore: readOptionalNumber(metadata["gostTemplateScore"]),
+        fieldNumber: fieldMapping.fieldNumber,
+        fieldRole: fieldMapping.fieldRole,
+        rowIndex: readOptionalNumber(metadata["rowIndex"]),
+        columnIndex: readOptionalNumber(metadata["columnIndex"]),
+        cellRole: fieldKey
+      },
+      sourceArtifactIds: [...input.sourceArtifactIds],
+      sourceCandidateId: candidate.localId,
+      location: candidate.location,
+      confidence: text?.confidence,
+      extractionStatus: rawText ? "extracted" : "missing",
+      warnings: rawText
+        ? []
+        : [
+            {
+              code: "stamp_source_field_text_missing",
+              message: "Stamp source field candidate did not produce recognized text.",
+              severity: "warning"
+            }
+          ]
+    };
+  });
+
+  return {
+    format: "pdf",
+    schema: { id: "pdf_stamp_source_fields", version: "1.0.0" },
+    extractionScope: "stamp_probe",
+    fields,
+    diagnostics: [
+      {
+        code: "pdf_stamp_source_fields_extracted",
+        message: "PDF stamp OCR outputs were projected to source fields.",
+        severity: "info",
+        metadata: {
+          candidateCount: input.candidates.length,
+          fieldCount: fields.length,
+          extractedCount: fields.filter((field) => field.extractionStatus === "extracted").length
+        }
+      }
+    ]
+  };
+}
+
+function buildGostTitleBlockInterpretation(
+  sourceFieldsArtifact: typeof schema.contentArtifacts.$inferSelect | undefined
+): {
+  readonly status: string;
+  readonly evidence: Record<string, unknown>;
+  readonly warnings: Record<string, unknown>[];
+} {
+  const fields = readRecordArray(sourceFieldsArtifact?.payload["fields"]);
+  const extractedFields = fields.filter((field) => field["extractionStatus"] === "extracted");
+  const byRole = new Map<string, Record<string, unknown>>();
+  for (const field of extractedFields) {
+    const semanticHint = readRecord(field["semanticHint"]);
+    const role = readString(semanticHint?.["fieldRole"]);
+    if (role && !byRole.has(role)) {
+      byRole.set(role, field);
+    }
+  }
+  const documentDesignation = sourceFieldValue(byRole.get("document_designation"));
+  const documentationStage = sourceFieldValue(byRole.get("documentation_stage"));
+  const constructionObjectName = sourceFieldValue(byRole.get("construction_object_name"));
+  const sheetTitle = sourceFieldValue(byRole.get("sheet_title"));
+  const productOrDocumentName = sourceFieldValue(byRole.get("product_or_document_name"));
+  const sheetNumber = sourceFieldValue(byRole.get("sheet_number"));
+  const warnings: Record<string, unknown>[] = [];
+
+  if (!sourceFieldsArtifact) {
+    warnings.push({
+      code: "stamp_source_fields_missing",
+      message: "No stamp source fields were available for title-block interpretation.",
+      severity: "warning"
+    });
+  }
+  if (!documentDesignation) {
+    warnings.push({
+      code: "title_block_document_designation_missing",
+      message: "Title-block document designation was not found in stamp source fields.",
+      severity: "warning"
+    });
+  }
+
+  return {
+    status: documentDesignation ? "interpreted" : fields.length > 0 ? "ambiguous" : "missing",
+    evidence: {
+      schema: { id: "gost_title_block_interpretation", version: "1.0.0" },
+      source: "gost_title_block_interpreter",
+      ...(documentDesignation ? { documentDesignation } : {}),
+      ...(documentationStage ? { documentationStage } : {}),
+      ...(constructionObjectName ? { constructionObjectName } : {}),
+      ...(sheetTitle ? { sheetTitle } : {}),
+      ...(productOrDocumentName ? { productOrDocumentName } : {}),
+      ...(sheetNumber ? { sheetNumber } : {}),
+      fields,
+      sourceContentArtifactIds: sourceFieldsArtifact ? [sourceFieldsArtifact.id] : []
+    },
+    warnings
+  };
+}
+
+function titleBlockRoutingEvidence(
+  evidence: Record<string, unknown> | undefined,
+  status: string | undefined
+): { readonly confidence: string } | undefined {
+  if (!evidence || status === "missing") {
+    return undefined;
+  }
+  if (readString(evidence["documentDesignation"])) {
+    return { confidence: "gost_title_block_designation" };
+  }
+  if (
+    readString(evidence["documentationStage"]) ||
+    readString(evidence["sheetTitle"]) ||
+    readString(evidence["productOrDocumentName"]) ||
+    titleBlockHasKnownForm(evidence)
+  ) {
+    return { confidence: "gost_title_block_form_evidence" };
+  }
+  return undefined;
+}
+
+function titleBlockHasKnownForm(evidence: Record<string, unknown>): boolean {
+  const fields = readRecordArray(evidence["fields"]);
+  return fields.some((field) => {
+    const semanticHint = readRecord(field["semanticHint"]);
+    const form = readString(semanticHint?.["form"]);
+    return Boolean(form && form !== "unknown");
+  });
+}
+
+function sourceFieldValue(field: Record<string, unknown> | undefined): string | undefined {
+  return normalizeSourceFieldText(field?.["normalizedText"] ?? field?.["rawText"]);
+}
+
+function normalizeSourceFieldText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function gostTitleBlockFieldMapping(
+  form: string,
+  fieldKey: string
+): { readonly fieldNumber?: number; readonly fieldRole: string } {
+  const mappingsByForm: Record<string, Record<string, { readonly fieldNumber?: number; readonly fieldRole: string }>> = {
+    form3: {
+      document_designation: { fieldNumber: 1, fieldRole: "document_designation" },
+      project_name: { fieldNumber: 2, fieldRole: "construction_object_name" },
+      sheet_title: { fieldNumber: 4, fieldRole: "sheet_title" },
+      document_name: { fieldNumber: 5, fieldRole: "product_or_document_name" },
+      stage_value: { fieldNumber: 6, fieldRole: "documentation_stage" },
+      sheet_number: { fieldNumber: 7, fieldRole: "sheet_number" },
+      sheet_count: { fieldNumber: 8, fieldRole: "unknown" },
+      change_number: { fieldRole: "revision" }
+    },
+    specification_short: {
+      document_designation: { fieldNumber: 1, fieldRole: "document_designation" },
+      project_name: { fieldNumber: 2, fieldRole: "construction_object_name" },
+      document_name: { fieldNumber: 5, fieldRole: "product_or_document_name" },
+      stage_value: { fieldNumber: 6, fieldRole: "documentation_stage" },
+      sheet_number: { fieldNumber: 7, fieldRole: "sheet_number" },
+      sheet_count: { fieldNumber: 8, fieldRole: "unknown" }
+    },
+    revision_wide: {
+      document_designation: { fieldNumber: 1, fieldRole: "document_designation" },
+      project_name: { fieldNumber: 2, fieldRole: "construction_object_name" },
+      sheet_title: { fieldNumber: 4, fieldRole: "sheet_title" },
+      document_name: { fieldNumber: 5, fieldRole: "product_or_document_name" },
+      stage_value: { fieldNumber: 6, fieldRole: "documentation_stage" }
+    },
+    form5: {
+      document_designation: { fieldNumber: 1, fieldRole: "document_designation" },
+      project_name: { fieldNumber: 2, fieldRole: "construction_object_name" },
+      sheet_title: { fieldNumber: 4, fieldRole: "sheet_title" },
+      document_name: { fieldNumber: 5, fieldRole: "product_or_document_name" },
+      stage_value: { fieldNumber: 6, fieldRole: "documentation_stage" },
+      sheet_number: { fieldNumber: 7, fieldRole: "sheet_number" },
+      sheet_count: { fieldNumber: 8, fieldRole: "unknown" }
+    }
+  };
+  const mapping = mappingsByForm[form]?.[fieldKey] ?? mappingsByForm["form3"]?.[fieldKey];
+  if (mapping) {
+    return mapping;
+  }
+  const fallbackRoles: Record<string, string> = {
+    document_designation: "document_designation",
+    project_name: "construction_object_name",
+    stage_value: "documentation_stage",
+    sheet_title: "sheet_title",
+    document_name: "product_or_document_name",
+    sheet_number: "sheet_number",
+    change_number: "revision"
+  };
+  return { fieldRole: fallbackRoles[fieldKey] ?? "unknown" };
+}
+
 function flattenPdfTableRows(
   tables: Awaited<ReturnType<CvOcrClient["reconstructPdfTables"]>>["tables"]
 ): Record<string, unknown>[] {
@@ -1634,6 +2096,22 @@ function readRecordArray(value: unknown): Record<string, unknown>[] {
           Boolean(item) && typeof item === "object" && !Array.isArray(item)
       )
     : [];
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "string" || value.length === 0) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return readRecord(parsed) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function readOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function readRequiredString(value: unknown, label: string): string {

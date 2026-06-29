@@ -16,6 +16,7 @@ import {
   documentIdentities,
   documentTypeResolutions,
   fileFormatDetections,
+  titleBlockInterpretations,
   typedDataRecords
 } from "./baseline-facts.js";
 import { baselineProcessingResults } from "./baseline-processing.js";
@@ -47,6 +48,7 @@ export const schema = {
   fileFormatDetections,
   contentArtifacts,
   documentTypeResolutions,
+  titleBlockInterpretations,
   typedDataRecords,
   documentIdentities,
   baselineProcessingResults,

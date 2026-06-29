@@ -50,6 +50,13 @@
       "when": 1782602696555,
       "tag": "0006_curious_calypso",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782649697785,
+      "tag": "0008_pale_nico_minoru",
+      "breakpoints": true
     }
   ]
 }

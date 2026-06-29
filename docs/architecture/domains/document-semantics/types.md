@@ -38,6 +38,28 @@ Subdomains:
 - title sheet data;
 - future document-type data.
 
+### GOST Title Block / Main Inscription
+
+Interprets source fields from drawing title blocks, commonly called stamps, into
+semantic evidence for routing and identity.
+
+This subdomain consumes content source fields such as `pdf_stamp_cell` and
+understands the GOST/SPDS title-block structure. It maps located field values
+to concepts such as document designation, sheet title, documentation stage,
+sheet number, revision/change markers, and signature-presence indicators.
+The mapping must be form-aware: GOST title blocks may use multiple forms or
+legacy variants, and a field role/number must be interpreted from the detected
+form/template plus the source cell role rather than from a single hard-coded
+stamp layout.
+
+It must not run CV, crop images, invoke OCR, or decide project-structure
+placement. Those responsibilities belong to Content, CV/OCR infrastructure, and
+Project Structure respectively.
+
+Early title-block interpretation may run before full typed document extraction
+so document type resolution can route large PDF files without waiting for full
+table OCR. Its output is semantic evidence and warnings, not final placement.
+
 ### Document Identity / Coding
 
 Identifies documents semantically through own codes, reference codes, normalized

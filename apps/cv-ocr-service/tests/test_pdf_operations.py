@@ -5,6 +5,14 @@ import pytest
 from io import BytesIO
 from PIL import Image, ImageDraw
 
+from processor.application.ocr_execution import OCRExecutor, OCRExecutorConfig
+from processor.application.ocr_candidates import GOST_STAMP_TEMPLATE_DEFINITIONS
+from processor.domain.ocr import OCRCandidate as LegacyOcrCandidate
+from processor.domain.ocr import OCRCandidatePlan, OCRImage, OCRResult
+from processor.domain.structural_extraction import BoundingBox as LegacyBoundingBox
+from processor.domain.structural_extraction import RenderedPage as LegacyRenderedPage
+from processor.domain.structural_extraction import StructuralExtractionRequest
+from processor.domain.text_layer import TextLayerPage, TextLayerWord
 from vai_cv_ocr_service.domain import (
     BoundingBox,
     ContentLocation,
@@ -26,6 +34,7 @@ from vai_cv_ocr_service.pdf_content_operations import (
     plan_ocr_candidates,
     reconstruct_pdf_tables,
     run_targeted_ocr,
+    service_request,
     tesseract_config,
 )
 
@@ -102,6 +111,63 @@ def test_plans_targeted_ocr_and_uses_text_layer_before_tesseract() -> None:
     assert not any(
         diagnostic.code == "ocr_tesseract_not_configured"
         for diagnostic in ocr_diagnostics
+    )
+
+
+def test_stamp_cells_use_text_layer_per_cell_before_ocr_engine() -> None:
+    engine = RecordingOcrEngine()
+    covered_cell = legacy_ocr_candidate("stamp-cell-covered", 10, 10)
+    uncovered_cell = legacy_ocr_candidate("stamp-cell-uncovered", 100, 10)
+
+    artifacts, diagnostics = OCRExecutor(
+        engine=engine,
+        config=OCRExecutorConfig(max_workers=1),
+    ).execute(
+        pages=(legacy_rendered_page(),),
+        plans=(OCRCandidatePlan(candidates=(covered_cell, uncovered_cell)),),
+        request=service_request(),
+        source_hash="test-source",
+        processor_version="test-processor",
+        config_hash="test-config",
+        text_layer_pages=(
+            TextLayerPage(
+                page_index=0,
+                words=(
+                    TextLayerWord(
+                        text="STAMP-CODE",
+                        bbox=LegacyBoundingBox(
+                            page_index=0,
+                            x=12,
+                            y=12,
+                            width=50,
+                            height=10,
+                            rotation_degrees=0,
+                            coordinate_space="page_px",
+                        ),
+                        block_index=0,
+                        line_index=0,
+                        word_index=0,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    text_artifacts = [artifact for artifact in artifacts if artifact.kind == "ocr_text"]
+    by_candidate = {
+        str(artifact.content_json["candidateLocalId"]): artifact.content_json
+        for artifact in text_artifacts
+    }
+
+    assert engine.recognized_candidate_ids == ["stamp-cell-uncovered"]
+    assert by_candidate["stamp-cell-covered"]["engine"] == "pdf-text-layer"
+    assert by_candidate["stamp-cell-covered"]["text"] == "STAMP-CODE"
+    assert by_candidate["stamp-cell-uncovered"]["engine"] == "fixture-ocr"
+    assert any(
+        diagnostic.code == "ocr_text_layer_candidates_matched"
+        and diagnostic.metadata["matchedCount"] == 1
+        and diagnostic.metadata["pendingOcrCount"] == 1
+        for diagnostic in diagnostics
     )
 
 
@@ -205,6 +271,24 @@ def test_candidate_planning_requires_rendered_pages() -> None:
         plan_ocr_candidates(())
 
 
+def test_short_specification_stamp_preserves_document_designation_field() -> None:
+    template = next(
+        definition
+        for definition in GOST_STAMP_TEMPLATE_DEFINITIONS
+        if definition.gost_form == "specification_short"
+    )
+
+    fields_by_name = {field[0]: field for field in template.field_specs}
+
+    assert fields_by_name["document_designation"] == (
+        "document_designation",
+        "title_left",
+        "top_edge",
+        "right_edge",
+        "header_bottom",
+    )
+
+
 def test_table_reconstruction_requires_rendered_pages() -> None:
     with pytest.raises(PdfContentOperationError):
         reconstruct_pdf_tables((), (), ())
@@ -270,6 +354,66 @@ def rendered_grid_page() -> RenderedPdfPage:
         size_bytes=len(image_bytes),
         content=image_bytes,
     )
+
+
+def legacy_rendered_page() -> LegacyRenderedPage:
+    image = Image.new("RGB", (200, 100), "white")
+    output = BytesIO()
+    image.save(output, format="PNG")
+    image_bytes = output.getvalue()
+    return LegacyRenderedPage(
+        page_index=0,
+        width_px=200,
+        height_px=100,
+        dpi=144,
+        image_format="png",
+        lossless=True,
+        sha256="legacy-rendered-page",
+        size_bytes=len(image_bytes),
+        image_bytes=image_bytes,
+    )
+
+
+def legacy_ocr_candidate(local_id: str, x: float, y: float) -> LegacyOcrCandidate:
+    bbox = LegacyBoundingBox(
+        page_index=0,
+        x=x,
+        y=y,
+        width=60,
+        height=20,
+        rotation_degrees=0,
+        coordinate_space="page_px",
+    )
+    return LegacyOcrCandidate(
+        local_id=local_id,
+        page_local_id="page-1",
+        source_region_local_id="stamp-region-1",
+        kind="stamp_cell_candidate",
+        source_type="stamp_field",
+        source_structural_kind="stamp",
+        bbox=bbox,
+        crop_bbox=bbox,
+        sort_order=1,
+        confidence=0.95,
+        target_dpi=144,
+        rotation_degrees=0,
+    )
+
+
+class RecordingOcrEngine:
+    def __init__(self) -> None:
+        self.recognized_candidate_ids: list[str] = []
+
+    def recognize(self, image: OCRImage, request: StructuralExtractionRequest) -> OCRResult:
+        self.recognized_candidate_ids.append(image.candidate.local_id)
+        return OCRResult(
+            candidate_local_id=image.candidate.local_id,
+            engine="fixture-ocr",
+            engine_version="test",
+            text=f"engine:{image.candidate.local_id}",
+            tsv="",
+            confidence=0.9,
+        )
 
 
 def table_cell_payload(text: str) -> dict[str, object]:

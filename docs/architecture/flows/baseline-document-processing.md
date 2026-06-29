@@ -149,20 +149,67 @@ Initial responsibilities:
 - PDF layout detection;
 - PDF OCR candidate planning;
 - PDF targeted OCR;
+- PDF source-field extraction, including stamp/title-block cells;
 - PDF table reconstruction;
 - XLSX cell extraction.
 
 Content artifacts are raw or semi-structured content. They are not final typed
 document facts and do not own document identity parsing.
 
+For large or OCR-heavy PDFs, content processing should support a stamp-first
+probe before full extraction:
+
+```text
+file technical outputs
+  -> PDF layout detection
+  -> stamp-cell OCR candidate planning
+  -> targeted OCR for unresolved stamp cells
+  -> stamp source-field artifacts
+  -> content.probed
+  -> GOST title-block interpretation
+  -> title_block.interpreted
+  -> document type resolution
+```
+
+The probe publishes durable content facts that are sufficient for early
+semantic routing. It must not classify the document family or assign identity
+roles.
+
 ### Document Type Resolution
 
-Document Type Resolution consumes content artifacts and technical hints to
-resolve the routing-level document family/type.
+Document Type Resolution consumes content artifacts, source fields, title-block
+semantic evidence, and technical hints to resolve the routing-level document
+family/type.
 
 The resolved family routes the document version to typed document data
 extractors. Uncertain or unsupported resolutions must be preserved with
 confidence and alternatives where possible.
+
+For PDF files with a successful content probe, document type resolution should
+run after title-block interpretation, not after full OCR/table extraction. If
+no title-block evidence can be produced, the resolver should still produce an
+explicit `unknown` or uncertain outcome from the available content and
+technical hints. Full content extraction is then routed by the resolved family.
+
+### GOST Title Block Semantics
+
+GOST title-block semantics consumes stamp source fields and interprets them as
+semantic evidence: document designation, documentation stage, sheet title, sheet
+number, revision/change markers, and related warnings.
+
+This semantic evidence may be produced before full typed document data
+extraction because it is needed for routing. It remains separate from final
+Document Identity parsing and Project Structure placement.
+
+The orchestration order is:
+
+```text
+content.probed
+  -> GOST title-block interpreter
+  -> title_block.interpreted
+  -> document type resolver
+  -> document_type.resolved
+```
 
 ### Typed Document Data
 

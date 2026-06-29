@@ -175,6 +175,45 @@ export const typedDataRecords = pgTable(
   ]
 );
 
+export const titleBlockInterpretations = pgTable(
+  "title_block_interpretations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentVersionId: uuid("document_version_id")
+      .notNull()
+      .references(() => documentVersions.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull(),
+    warnings: jsonb("warnings").$type<Record<string, unknown>[]>().notNull().default([]),
+    sourceContentArtifactIds: jsonb("source_content_artifact_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    producedByJobId: uuid("produced_by_job_id").references(() => processingJobs.id),
+    ...timestamps
+  },
+  (table) => [
+    uniqueIndex("title_block_interpretations_org_version_unique").on(
+      table.organizationId,
+      table.documentVersionId
+    ),
+    foreignKey({
+      name: "title_block_interpretations_version_same_org_fk",
+      columns: [table.organizationId, table.documentVersionId],
+      foreignColumns: [documentVersions.organizationId, documentVersions.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "title_block_interpretations_job_same_org_fk",
+      columns: [table.organizationId, table.producedByJobId],
+      foreignColumns: [processingJobs.organizationId, processingJobs.id]
+    }),
+    index("title_block_interpretations_organization_idx").on(table.organizationId)
+  ]
+);
+
 export const documentIdentities = pgTable(
   "document_identities",
   {

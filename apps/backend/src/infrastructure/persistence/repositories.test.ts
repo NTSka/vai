@@ -1069,7 +1069,14 @@ describe("Phase 7 baseline processing skeleton", () => {
       (artifact) => artifact.artifactType === "pdf_ocr_candidates"
     );
     const ocrText = artifacts.find((artifact) => artifact.artifactType === "pdf_ocr_text");
+    const stampSourceFields = artifacts.find(
+      (artifact) => artifact.artifactType === "pdf_stamp_source_fields"
+    );
     const tables = artifacts.find((artifact) => artifact.artifactType === "pdf_tables");
+    const [titleBlock] = await database
+      .select()
+      .from(schema.titleBlockInterpretations)
+      .where(eq(schema.titleBlockInterpretations.documentVersionId, version?.id ?? ""));
 
     expect(version?.status).toBe("ready");
     expect(metadata?.payload).toMatchObject({
@@ -1095,11 +1102,38 @@ describe("Phase 7 baseline processing skeleton", () => {
     });
     expect(ocrCandidates?.payload).toMatchObject({
       format: "pdf",
-      candidates: [expect.objectContaining({ localId: "ocr-candidate-1" })]
+      candidates: [
+        expect.objectContaining({ localId: "ocr-candidate-stamp-designation" }),
+        expect.objectContaining({ localId: "ocr-candidate-1" })
+      ]
     });
     expect(ocrText?.payload).toMatchObject({
       format: "pdf",
       texts: [expect.objectContaining({ text: "PRJ-001-R-KJ" })]
+    });
+    expect(stampSourceFields?.payload).toMatchObject({
+      format: "pdf",
+      fields: [
+        expect.objectContaining({
+          fieldKey: "document_designation",
+          normalizedText: "PRJ-001-R-KJ",
+          sourceKind: "pdf_stamp_cell",
+          sourceArtifactIds: expect.any(Array),
+          semanticHint: expect.objectContaining({
+            kind: "gost_title_block",
+            form: "form3",
+            templateId: "gost-r-21.101-2020-form3",
+            fieldNumber: 1,
+            fieldRole: "document_designation"
+          })
+        })
+      ]
+    });
+    expect(titleBlock).toMatchObject({
+      status: "interpreted",
+      evidence: expect.objectContaining({
+        documentDesignation: "PRJ-001-R-KJ"
+      })
     });
     expect(tables?.payload).toMatchObject({
       format: "pdf",
@@ -2613,6 +2647,30 @@ function createCvOcrClientDouble(
       adapter: { id: "test-ocr-plan", version: "1.0.0" },
       candidates: [
         {
+          localId: "ocr-candidate-stamp-designation",
+          targetKind: "stamp_field",
+          sourceRegionId: "layout-region-1",
+          location: {
+            bbox: {
+              pageNumber: 1,
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 30,
+              coordinateSystem: "page_px"
+            }
+          },
+          expectedValueKind: "document_designation",
+          metadataJson: JSON.stringify({
+            gostForm: "form3",
+            gostTemplateId: "gost-r-21.101-2020-form3",
+            gostTemplateScore: 0.91,
+            gostField: "document_designation",
+            rowIndex: 0,
+            columnIndex: 0
+          })
+        },
+        {
           localId: "ocr-candidate-1",
           targetKind: "table_cell",
           sourceRegionId: "layout-region-1",
@@ -2631,18 +2689,16 @@ function createCvOcrClientDouble(
       ],
       diagnostics: []
     }),
-    runPdfTargetedOcr: async () => ({
+    runPdfTargetedOcr: async (input) => ({
       adapter: { id: "test-ocr", version: "1.0.0" },
-      texts: [
-        {
-          localId: "ocr-text-1",
-          sourceCandidateId: "ocr-candidate-1",
-          text: "PRJ-001-R-KJ",
-          confidence: 0.95,
-          engine: "test-ocr",
-          engineVersion: "1.0.0"
-        }
-      ],
+      texts: input.candidates.map((candidate) => ({
+        localId: `ocr-text-${candidate.localId}`,
+        sourceCandidateId: candidate.localId,
+        text: "PRJ-001-R-KJ",
+        confidence: 0.95,
+        engine: "test-ocr",
+        engineVersion: "1.0.0"
+      })),
       diagnostics: []
     }),
     reconstructPdfTables: async () => ({

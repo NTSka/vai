@@ -53,6 +53,13 @@ export type BaselineFactsRepository = {
     readonly organizationId: string;
     readonly documentVersionId: string;
   }): Promise<typeof schema.documentTypeResolutions.$inferSelect | undefined>;
+  upsertTitleBlockInterpretation(
+    input: typeof schema.titleBlockInterpretations.$inferInsert
+  ): Promise<typeof schema.titleBlockInterpretations.$inferSelect>;
+  findTitleBlockInterpretation(input: {
+    readonly organizationId: string;
+    readonly documentVersionId: string;
+  }): Promise<typeof schema.titleBlockInterpretations.$inferSelect | undefined>;
   upsertTypedDataRecord(
     input: typeof schema.typedDataRecords.$inferInsert
   ): Promise<typeof schema.typedDataRecords.$inferSelect>;
@@ -279,6 +286,44 @@ export function createBaselineFactsRepository(db: Db): BaselineFactsRepository {
         .limit(1);
 
       return resolution;
+    },
+
+    async upsertTitleBlockInterpretation(input) {
+      const [interpretation] = await db
+        .insert(schema.titleBlockInterpretations)
+        .values(input)
+        .onConflictDoUpdate({
+          target: [
+            schema.titleBlockInterpretations.organizationId,
+            schema.titleBlockInterpretations.documentVersionId
+          ],
+          set: {
+            status: input.status,
+            evidence: input.evidence,
+            warnings: input.warnings,
+            sourceContentArtifactIds: input.sourceContentArtifactIds,
+            producedByJobId: input.producedByJobId,
+            updatedAt: new Date()
+          }
+        })
+        .returning();
+
+      return requireRow(interpretation, "title block interpretation");
+    },
+
+    async findTitleBlockInterpretation(input) {
+      const [interpretation] = await db
+        .select()
+        .from(schema.titleBlockInterpretations)
+        .where(
+          and(
+            eq(schema.titleBlockInterpretations.organizationId, input.organizationId),
+            eq(schema.titleBlockInterpretations.documentVersionId, input.documentVersionId)
+          )
+        )
+        .limit(1);
+
+      return interpretation;
     },
 
     async upsertTypedDataRecord(input) {
