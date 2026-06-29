@@ -1035,19 +1035,28 @@ async function executeProjectStructureProjection(
     await failJob(input.processing, job, "document_identity_not_found", payload);
     return;
   }
+  const typedDataRecords = await input.baselineFacts.listTypedDataRecords({
+    organizationId: job.organizationId,
+    documentVersionId: payload.documentVersionId
+  });
 
-  const node = await findOrCreatePlacementNode({
+  const placementNode = await findOrCreatePlacementNode({
     projectStructure: input.projectStructure,
     organizationId: job.organizationId,
-    identity
+    identity,
+    nameHints: buildProjectStructureNameHints({ identity, typedDataRecords })
   });
+  const identityPlacementStatus = placementStatusForIdentity(identity);
   const placement = await input.projectStructure.createOrUpdatePlacement({
     organizationId: job.organizationId,
     documentId: identity.documentId,
     documentVersionId: payload.documentVersionId,
     placedByIdentityId: identity.id,
-    nodeId: node.id,
-    status: placementStatusForIdentity(identity),
+    nodeId: placementNode.node.id,
+    status:
+      identityPlacementStatus === "placed" && placementNode.status === "ambiguous"
+        ? "ambiguous"
+        : identityPlacementStatus,
     producedByJobId: job.id
   });
 
@@ -1255,37 +1264,57 @@ async function findOrCreatePlacementNode(input: {
   readonly projectStructure: ProjectStructureRepository;
   readonly organizationId: string;
   readonly identity: typeof schema.documentIdentities.$inferSelect;
-}): Promise<typeof schema.projectStructureNodes.$inferSelect> {
-  if (!canPlaceIdentity(input.identity)) {
-    return input.projectStructure.findOrCreateNode({
+  readonly nameHints: ProjectStructureNameHints;
+}): Promise<{
+  readonly node: typeof schema.projectStructureNodes.$inferSelect;
+  readonly status: "placed" | "ambiguous";
+}> {
+  let status: "placed" | "ambiguous" = "placed";
+  const findOrCreateNode = async (nodeInput: {
+    readonly kind: typeof schema.projectStructureNodeKind.enumValues[number];
+    readonly key: string;
+    readonly title: string;
+    readonly subject?: typeof schema.projectStructureNodeSubject.enumValues[number];
+    readonly parentId?: string;
+  }) => {
+    const result = await findOrCreateNamedStructureNode({
+      projectStructure: input.projectStructure,
       organizationId: input.organizationId,
+      identityId: input.identity.id,
+      ...nodeInput
+    });
+    if (result.status === "ambiguous") {
+      status = "ambiguous";
+    }
+    return result.node;
+  };
+
+  if (!canPlaceIdentity(input.identity)) {
+    const node = await findOrCreateNode({
       kind: "document_group",
       key: "unplaced",
       title: "Неразмещенные документы",
-      subject: "document_group",
-      sourceIdentityIds: [input.identity.id]
+      subject: "document_group"
     });
+    return { node, status };
   }
 
   const projectCode = readString(input.identity.parsedParts["projectCode"]);
   if (!projectCode) {
-    return input.projectStructure.findOrCreateNode({
-      organizationId: input.organizationId,
+    const node = await findOrCreateNode({
       kind: "document_group",
       key: "unplaced",
       title: "Неразмещенные документы",
-      subject: "document_group",
-      sourceIdentityIds: [input.identity.id]
+      subject: "document_group"
     });
+    return { node, status };
   }
 
-  let current = await input.projectStructure.findOrCreateNode({
-    organizationId: input.organizationId,
+  let current = await findOrCreateNode({
     kind: "project",
     key: projectCode,
-    title: projectCode,
-    subject: "project",
-    sourceIdentityIds: [input.identity.id]
+    title: input.nameHints.projectTitle ?? projectCode,
+    subject: "project"
   });
 
   const siteCode = readString(input.identity.parsedParts["siteCode"]);
@@ -1293,115 +1322,289 @@ async function findOrCreatePlacementNode(input: {
   const subobjectCode = readString(input.identity.parsedParts["subobjectCode"]);
   if (siteCode || workCode || subobjectCode) {
     if (siteCode) {
-      current = await input.projectStructure.findOrCreateNode({
-        organizationId: input.organizationId,
+      current = await findOrCreateNode({
         kind: "complex_kind",
-        key: siteCode,
-        title: `Площадка ${siteCode}`,
+        key: input.nameHints.siteKey ?? siteCode,
+        title: input.nameHints.siteTitle ?? `Площадка ${siteCode}`,
         subject: "object",
-        parentId: current.id,
-        sourceIdentityIds: [input.identity.id]
+        parentId: current.id
+      });
+      current = await findOrCreateNode({
+        kind: "stage",
+        key: input.nameHints.stageKey ?? siteCode,
+        title: input.nameHints.stageTitle ?? `Этап/часть ${siteCode}`,
+        subject: "document_package",
+        parentId: current.id
       });
     }
     if (workCode) {
-      current = await input.projectStructure.findOrCreateNode({
-        organizationId: input.organizationId,
+      current = await findOrCreateNode({
         kind: "complex_part_kind",
         key: workCode,
-        title: `Объект/работа ${workCode}`,
+        title: input.nameHints.workTitle ?? `Объект/работа ${workCode}`,
         subject: "object",
-        parentId: current.id,
-        sourceIdentityIds: [input.identity.id]
+        parentId: current.id
       });
     }
     if (subobjectCode) {
-      current = await input.projectStructure.findOrCreateNode({
-        organizationId: input.organizationId,
-        kind: "complex_part_number",
-        key: subobjectCode,
-        title: `Подобъект ${subobjectCode}`,
-        subject: "subobject",
-        parentId: current.id,
-        sourceIdentityIds: [input.identity.id]
-      });
+      const shouldCreateSubobjectNode =
+        subobjectCode !== "0" || Boolean(input.nameHints.subobjectTitle);
+      if (shouldCreateSubobjectNode) {
+        current = await findOrCreateNode({
+          kind: "complex_part_number",
+          key: subobjectCode,
+          title: input.nameHints.subobjectTitle ?? `Подобъект ${subobjectCode}`,
+          subject: "subobject",
+          parentId: current.id
+        });
+      }
     }
-    return current;
+    return { node: current, status };
   }
 
   const stage = readString(input.identity.parsedParts["stage"]);
   if (stage === "П") {
     const sectionNumber = readString(input.identity.parsedParts["sectionNumber"]);
     if (sectionNumber) {
-      current = await input.projectStructure.findOrCreateNode({
-        organizationId: input.organizationId,
+      current = await findOrCreateNode({
         kind: "documentation_section",
         key: sectionNumber,
         title: `Раздел ${sectionNumber}`,
         subject: "documentation_section",
-        parentId: current.id,
-        sourceIdentityIds: [input.identity.id]
+        parentId: current.id
       });
     }
 
     const subsectionTitle = readString(input.identity.parsedParts["subsectionTitle"]);
     if (subsectionTitle) {
-      current = await input.projectStructure.findOrCreateNode({
-        organizationId: input.organizationId,
+      current = await findOrCreateNode({
         kind: "documentation_subsection",
         key: subsectionTitle,
         title: subsectionTitle,
         subject: "documentation_section",
-        parentId: current.id,
-        sourceIdentityIds: [input.identity.id]
+        parentId: current.id
       });
     }
 
     const volumeNumber = readString(input.identity.parsedParts["volumeNumber"]);
     if (volumeNumber) {
-      current = await input.projectStructure.findOrCreateNode({
-        organizationId: input.organizationId,
+      current = await findOrCreateNode({
         kind: "documentation_volume",
         key: volumeNumber,
         title: `Том ${volumeNumber}`,
         subject: "documentation_volume",
-        parentId: current.id,
-        sourceIdentityIds: [input.identity.id]
+        parentId: current.id
       });
     }
 
-    return current;
+    return { node: current, status };
   }
 
   if (stage) {
-    current = await input.projectStructure.findOrCreateNode({
-      organizationId: input.organizationId,
+    current = await findOrCreateNode({
       kind: "stage",
       key: stage,
       title: stage,
       subject: "document_package",
-      parentId: current.id,
-      sourceIdentityIds: [input.identity.id]
+      parentId: current.id
     });
   }
 
   const mark = readString(input.identity.parsedParts["mark"]);
   if (mark) {
-    current = await input.projectStructure.findOrCreateNode({
-      organizationId: input.organizationId,
+    current = await findOrCreateNode({
       kind: "mark",
       key: mark,
       title: mark,
       subject: "discipline_or_mark",
-      parentId: current.id,
-      sourceIdentityIds: [input.identity.id]
+      parentId: current.id
     });
   }
 
-  return current;
+  return { node: current, status };
+}
+
+type ProjectStructureNameHints = {
+  readonly projectTitle?: string;
+  readonly siteTitle?: string;
+  readonly siteKey?: string;
+  readonly stageTitle?: string;
+  readonly stageKey?: string;
+  readonly workTitle?: string;
+  readonly subobjectTitle?: string;
+};
+
+async function findOrCreateNamedStructureNode(input: {
+  readonly projectStructure: ProjectStructureRepository;
+  readonly organizationId: string;
+  readonly identityId: string;
+  readonly kind: typeof schema.projectStructureNodeKind.enumValues[number];
+  readonly key: string;
+  readonly title: string;
+  readonly subject?: typeof schema.projectStructureNodeSubject.enumValues[number];
+  readonly parentId?: string;
+}): Promise<{
+  readonly node: typeof schema.projectStructureNodes.$inferSelect;
+  readonly status: "placed" | "ambiguous";
+}> {
+  const existing = await input.projectStructure.findNodeByStableLookup({
+    organizationId: input.organizationId,
+    kind: input.kind,
+    key: input.key,
+    ...(input.parentId ? { parentId: input.parentId } : {})
+  });
+  if (existing) {
+    if (isPlaceholderNodeTitle(existing.title, existing.key, input.kind)) {
+      const node = await input.projectStructure.updateNodeTitle({
+        organizationId: input.organizationId,
+        id: existing.id,
+        title: input.title
+      });
+      return { node, status: "placed" };
+    }
+    return {
+      node: existing,
+      status: areCloseNodeTitles(existing.title, input.title) ? "placed" : "ambiguous"
+    };
+  }
+
+  const node = await input.projectStructure.findOrCreateNode({
+    organizationId: input.organizationId,
+    kind: input.kind,
+    key: input.key,
+    title: input.title,
+    ...(input.subject ? { subject: input.subject } : {}),
+    ...(input.parentId ? { parentId: input.parentId } : {}),
+    sourceIdentityIds: [input.identityId]
+  });
+  return { node, status: "placed" };
+}
+
+function buildProjectStructureNameHints(input: {
+  readonly identity: typeof schema.documentIdentities.$inferSelect;
+  readonly typedDataRecords: readonly (typeof schema.typedDataRecords.$inferSelect)[];
+}): ProjectStructureNameHints {
+  const sourceTypedDataRecordIds = readStringArray(input.identity.parsedParts["sourceTypedDataRecordIds"]) ?? [];
+  const typedData =
+    input.typedDataRecords.find((record) => sourceTypedDataRecordIds.includes(record.id)) ??
+    input.typedDataRecords.find((record) => record.family === "estimate");
+  const projectContext = readRecord(readRecord(typedData?.data["header"])?.["projectContext"]);
+  if (!projectContext) return {};
+  const projectTitle = readTypedFieldValue(projectContext["projectName"]);
+  const siteCode = readString(input.identity.parsedParts["siteCode"]);
+  const rawSiteTitle = readTypedFieldValue(projectContext["siteName"]);
+  const siteTitle = rawSiteTitle ? normalizeSiteTitleHint(rawSiteTitle) : undefined;
+  const siteKey = siteTitle ? stableStructureNameKey(siteTitle) : undefined;
+  const stageTitle = readTypedFieldValue(projectContext["stageName"]);
+  const stageKey = siteCode ?? (stageTitle ? stableStructureNameKey(stageTitle) : undefined);
+  const workTitle = readTypedFieldValue(projectContext["facilityName"]);
+  const subobjectCode = readString(input.identity.parsedParts["subobjectCode"]);
+  const subfacilityTitle = readTypedFieldValue(projectContext["subfacilityName"]);
+  const workScopeTitle = readTypedFieldValue(projectContext["workScope"]);
+  const subobjectTitle =
+    subfacilityTitle ?? (subobjectCode && subobjectCode !== "0" ? workScopeTitle : undefined);
+  return {
+    ...(projectTitle ? { projectTitle } : {}),
+    ...(siteTitle ? { siteTitle } : {}),
+    ...(siteKey ? { siteKey } : {}),
+    ...(stageTitle ? { stageTitle } : {}),
+    ...(stageKey ? { stageKey } : {}),
+    ...(workTitle ? { workTitle } : {}),
+    ...(subobjectTitle ? { subobjectTitle } : {})
+  };
+}
+
+function stableStructureNameKey(title: string): string {
+  return normalizeStructureTitle(title).replace(/\s+/g, "-");
+}
+
+function normalizeSiteTitleHint(title: string): string {
+  const normalized = title.trim().replace(/\s+/g, " ");
+  const quotedSiteMatch = /^([^\s]+\s*[-]?\s*\d+\s+"[^"]+")\s*.+$/iu.exec(normalized);
+  return quotedSiteMatch?.[1]?.trim() ?? normalized;
+}
+
+function readTypedFieldValue(value: unknown): string | undefined {
+  return readString(readRecord(value)?.["value"]);
+}
+
+function isPlaceholderNodeTitle(
+  title: string,
+  key: string,
+  kind: typeof schema.projectStructureNodeKind.enumValues[number]
+): boolean {
+  const normalizedTitle = normalizeStructureTitle(title);
+  const normalizedKey = normalizeStructureTitle(key);
+  if (normalizedTitle === normalizedKey) return true;
+  const placeholders: Record<string, string> = {
+    complex_kind: `площадка ${normalizedKey}`,
+    complex_part_kind: `объект работа ${normalizedKey}`,
+    complex_part_number: `подобъект ${normalizedKey}`
+  };
+  return placeholders[kind] === normalizedTitle;
+}
+
+function areCloseNodeTitles(left: string, right: string): boolean {
+  const normalizedLeft = normalizeStructureTitle(left);
+  const normalizedRight = normalizeStructureTitle(right);
+  if (normalizedLeft === normalizedRight) return true;
+  if (!normalizedLeft || !normalizedRight) return true;
+  return titleTokenSimilarity(normalizedLeft, normalizedRight) >= 0.7 ||
+    levenshteinSimilarity(normalizedLeft, normalizedRight) >= 0.82;
+}
+
+function titleTokenSimilarity(left: string, right: string): number {
+  const leftTokens = new Set(left.split(" ").filter(Boolean));
+  const rightTokens = new Set(right.split(" ").filter(Boolean));
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+  const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  return intersection / union;
+}
+
+function levenshteinSimilarity(left: string, right: string): number {
+  const distance = levenshteinDistance(left, right);
+  const maxLength = Math.max(left.length, right.length);
+  return maxLength === 0 ? 1 : 1 - distance / maxLength;
+}
+
+function levenshteinDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+    const current = [leftIndex + 1];
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex] === right[rightIndex] ? 0 : 1;
+      current[rightIndex + 1] = Math.min(
+        (current[rightIndex] ?? 0) + 1,
+        (previous[rightIndex + 1] ?? 0) + 1,
+        (previous[rightIndex] ?? 0) + substitutionCost
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length] ?? 0;
+}
+
+function normalizeStructureTitle(value: string): string {
+  return value
+    .trim()
+    .replace(/[«»“”]/g, "\"")
+    .replace(/[–—−]/g, "-")
+    .replace(/кс\s*[-]?\s*(\d+)/giu, "кс-$1")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? value
+    : undefined;
 }
 
 function selectPlacementIdentity(input: {

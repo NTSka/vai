@@ -27,6 +27,13 @@ document versions attached to it.
   themselves.
 - Nodes should be stable for a given organization, node kind, parent, and key so
   documents from different uploads can be grouped together.
+- Node titles may be named from parsed typed-data context, for example estimate
+  project/site/object names. The stable key remains code-derived; names are
+  display/canonicalization hints, not identity keys.
+- If a document proposes a name for an existing code-derived node and the name
+  is neither equal nor close after normalization and fuzzy matching, the
+  projection should keep the existing node and mark the placement ambiguous
+  instead of silently creating a duplicate branch.
 - Any project-structure node may act as a bucket where one or more documents are
   shown. Some document types, such as estimates, may naturally attach to a
   higher-level project, object, subobject, or stage node instead of the deepest

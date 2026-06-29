@@ -5,9 +5,27 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
 import { buildXlsxCellsPayload, type XlsxCellCollectionPayload } from "./xlsx-artifacts.js";
-import { detectEstimateXlsxTemplates, parseEstimateXlsx } from "./estimate-xlsx.js";
+import {
+  buildEstimateProjectContext,
+  detectEstimateXlsxTemplates,
+  parseEstimateXlsx
+} from "./estimate-xlsx.js";
 
 describe("estimate XLSX templates", () => {
+  it("does not merge quoted compressor station site names with facility tails", () => {
+    const context = buildEstimateProjectContext({
+      constructionName: typedText("Магистральный газопровод Сахалин-Хабаровск-Владивосток. Этап 12.1. КС-9 \"Дальнереченская\""),
+      workName: typedText("Монтажные работы.Этап 12.1. КС-9 \"Дальнереченская\" Установка подготовки газа.Технология производства. Монтаж оборудования")
+    });
+
+    expect(context).toMatchObject({
+      siteName: expect.objectContaining({ value: "КС-9 \"Дальнереченская\"" }),
+      facilityName: expect.objectContaining({ value: "Установка подготовки газа" }),
+      subfacilityName: expect.objectContaining({ value: "Технология производства" }),
+      workScope: expect.objectContaining({ value: "Монтаж оборудования" })
+    });
+  });
+
   it("classifies every estimate XLSX fixture by document form", async () => {
     const fixtures = await readEstimateFixtureCellPayloads();
     const expectedKinds = new Map([
@@ -41,6 +59,18 @@ describe("estimate XLSX templates", () => {
       },
       header: {
         estimateNumber: expect.objectContaining({ value: "03:97077/04-14-121-02" }),
+        projectContext: expect.objectContaining({
+          parseStatus: "parsed",
+          projectName: expect.objectContaining({
+            value: "Магистральный газопровод Сахалин - Хабаровск - Владивосток"
+          }),
+          stageName: expect.objectContaining({ value: "Этап 12.1" }),
+          siteName: expect.objectContaining({ value: "КС-9 \"Дальнереченская\"" }),
+          facilityName: expect.objectContaining({
+            value: "Здание закрытого распределительного устройства"
+          }),
+          workScope: expect.objectContaining({ value: "Конструкции металлические" })
+        }),
         basis: expect.objectContaining({
           value: "0471.022.П.12/1.0003.КС.009.4512.016-3-КМ"
         }),
@@ -95,6 +125,18 @@ describe("estimate XLSX templates", () => {
       },
       header: {
         estimateNumber: expect.objectContaining({ value: "03:97077/04-14-121-02" }),
+        projectContext: expect.objectContaining({
+          parseStatus: "parsed",
+          projectName: expect.objectContaining({
+            value: "Магистральный газопровод Сахалин - Хабаровск - Владивосток"
+          }),
+          stageName: expect.objectContaining({ value: "Этап 12.1" }),
+          siteName: expect.objectContaining({ value: "КС-9 \"Дальнереченская\"" }),
+          facilityName: expect.objectContaining({
+            value: "Здание закрытого распределительного устройства"
+          }),
+          workScope: expect.objectContaining({ value: "Конструкции металлические" })
+        }),
         basis: expect.objectContaining({
           value: "0471.022.П.12/1.0003.КС.009.4512.016-3-КМ"
         }),
@@ -151,6 +193,16 @@ async function parseFixtureByExpectedKind(kind: "local_estimate_calculation" | "
     .find((candidate) => candidate?.kind === kind);
   expect(parsed).toBeDefined();
   return parsed;
+}
+
+function typedText(value: string) {
+  return {
+    raw: value,
+    value,
+    normalized: value,
+    confidence: 1,
+    source: []
+  };
 }
 
 async function readEstimateFixtureCellPayloads(): Promise<

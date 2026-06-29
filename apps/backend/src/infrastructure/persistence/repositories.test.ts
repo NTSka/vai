@@ -1591,6 +1591,100 @@ describe("Phase 7 baseline processing skeleton", () => {
     });
   });
 
+  dbIt("groups estimate structure by physical site and code stage", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createRegisteredDocumentContext(database, {
+      originalName: "estimate-a.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const fixture = createBaselinePipelineFixture(database);
+    const firstIdentity = await createEstimatePlacementIdentity(database, {
+      context,
+      normalizedValue: "PRJ-001-002-7-KM",
+      siteCode: "001",
+      stageName: "Этап 12.1",
+      siteName: "КС-9 \"Дальнереченская\""
+    });
+
+    await publishDocumentIdentityResolved(fixture, context, firstIdentity.id);
+    await runBaselinePipelineToIdle(fixture);
+
+    const secondContext = await createRegisteredDocumentContextForOrganization(database, {
+      organizationId: context.organization.id,
+      uploadedBy: context.user.id,
+      originalName: "estimate-b.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const secondIdentity = await createEstimatePlacementIdentity(database, {
+      context: secondContext,
+      normalizedValue: "PRJ-002-002-7-KM",
+      siteCode: "002",
+      stageName: "Этап 12.2",
+      siteName: "КС-9 \"Дальнереченская\""
+    });
+
+    await publishDocumentIdentityResolved(fixture, secondContext, secondIdentity.id);
+    await runBaselinePipelineToIdle(fixture);
+
+    const nodes = await database
+      .select()
+      .from(schema.projectStructureNodes)
+      .where(eq(schema.projectStructureNodes.organizationId, context.organization.id));
+    const placements = await database
+      .select()
+      .from(schema.projectStructurePlacements)
+      .where(eq(schema.projectStructurePlacements.organizationId, context.organization.id));
+    const project = nodes.find((node) => node.kind === "project");
+    const site = nodes.find((node) => node.kind === "complex_kind");
+    const stages = nodes.filter((node) => node.kind === "stage");
+    const work = nodes.find((node) => node.kind === "complex_part_kind");
+
+    expect(project).toMatchObject({
+      key: "PRJ",
+      title: "Магистральный газопровод Сахалин - Хабаровск - Владивосток"
+    });
+    expect(site).toMatchObject({
+      key: "кс-9-дальнереченская",
+      title: "КС-9 \"Дальнереченская\"",
+      parentId: project?.id
+    });
+    expect(stages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "001",
+          title: "Этап 12.1",
+          parentId: site?.id
+        }),
+        expect.objectContaining({
+          key: "002",
+          title: "Этап 12.2",
+          parentId: site?.id
+        })
+      ])
+    );
+    expect(work).toMatchObject({
+      key: "002",
+      title: "Здание закрытого распределительного устройства",
+      parentId: stages.find((node) => node.key === "001")?.id
+    });
+    expect(placements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          documentVersionId: context.version.id,
+          status: "placed"
+        }),
+        expect.objectContaining({
+          documentVersionId: secondContext.version.id,
+          status: "placed"
+        })
+      ])
+    );
+  });
+
   dbIt("does not promote standalone statement row references to source own identity", async () => {
     const database = getDatabase();
     if (!database) return;
@@ -2552,6 +2646,145 @@ async function createRegisteredDocumentContext(
   });
 
   return { ...context, document: documentWithCurrentVersion, version };
+}
+
+async function createRegisteredDocumentContextForOrganization(
+  database: TestDb,
+  input: {
+    readonly organizationId: string;
+    readonly uploadedBy: string;
+    readonly originalName?: string;
+    readonly mimeType?: string;
+    readonly extension?: string;
+  }
+) {
+  const intake = createDocumentIntakeRepository(database);
+  const registry = createDocumentRegistryRepository(database);
+  const storedFile = await intake.createStoredFile({
+    organizationId: input.organizationId,
+    originalName: input.originalName ?? "source.pdf",
+    mimeType: input.mimeType ?? "application/pdf",
+    extension: input.extension ?? ".pdf",
+    sizeBytes: 512,
+    checksum: `checksum-${randomUUID()}`,
+    checksumAlgorithm: "sha256",
+    storage: {
+      provider: "s3_compatible",
+      bucket: "vai-local-files",
+      key: `original/${randomUUID()}.pdf`
+    },
+    purpose: "original_upload"
+  });
+  const documentSet = await intake.createDocumentSet({
+    organizationId: input.organizationId,
+    uploadedBy: input.uploadedBy,
+    source: "manual_upload",
+    originalFileIds: [storedFile.id],
+    status: "accepted"
+  });
+  const document = await registry.createDocument({
+    organizationId: input.organizationId
+  });
+  const version = await registry.createDocumentVersion({
+    organizationId: input.organizationId,
+    documentId: document.id,
+    documentSetId: documentSet.id,
+    storedFileId: storedFile.id,
+    versionNumber: 1
+  });
+  const documentWithCurrentVersion = await registry.setCurrentVersion({
+    organizationId: input.organizationId,
+    documentId: document.id,
+    currentVersionId: version.id
+  });
+
+  return {
+    organization: { id: input.organizationId },
+    user: { id: input.uploadedBy },
+    storedFile,
+    documentSet,
+    document: documentWithCurrentVersion,
+    version
+  };
+}
+
+async function createEstimatePlacementIdentity(
+  database: TestDb,
+  input: {
+    readonly context: {
+      readonly organization: { readonly id: string };
+      readonly document: { readonly id: string };
+      readonly version: { readonly id: string };
+    };
+    readonly normalizedValue?: string;
+    readonly siteCode?: string;
+    readonly stageName?: string;
+    readonly siteName: string;
+  }
+) {
+  const baselineFacts = createBaselineFactsRepository(database);
+  const typedData = await baselineFacts.upsertTypedDataRecord({
+    organizationId: input.context.organization.id,
+    documentVersionId: input.context.version.id,
+    family: "estimate",
+    data: {
+      header: {
+        projectContext: {
+          projectName: {
+            value: "Магистральный газопровод Сахалин - Хабаровск - Владивосток"
+          },
+          stageName: { value: input.stageName ?? "Этап 12.1" },
+          siteName: { value: input.siteName },
+          facilityName: {
+            value: "Здание закрытого распределительного устройства"
+          }
+        }
+      }
+    }
+  });
+  return baselineFacts.upsertDocumentIdentity({
+    organizationId: input.context.organization.id,
+    documentId: input.context.document.id,
+    documentVersionId: input.context.version.id,
+    role: "reference_code",
+    identityKey: `reference_code:${input.normalizedValue ?? "PRJ-001-002"}:${input.context.version.id}`,
+    normalizedValue: input.normalizedValue ?? "PRJ-001-002",
+    parseStatus: "parsed",
+    parsedParts: {
+      projectCode: "PRJ",
+      siteCode: input.siteCode ?? "001",
+      workCode: "002",
+      subobjectCode: "7",
+      sourceTypedDataRecordIds: [typedData.id]
+    },
+    sourceTypedDataRecordIds: [typedData.id]
+  });
+}
+
+async function publishDocumentIdentityResolved(
+  fixture: ReturnType<typeof createBaselinePipelineFixture>,
+  context: {
+    readonly organization: { readonly id: string };
+    readonly documentSet: { readonly id: string };
+    readonly document: { readonly id: string };
+    readonly version: { readonly id: string };
+  },
+  documentIdentityId: string
+): Promise<void> {
+  await fixture.eventing.publish({
+    type: "document_identity.resolved",
+    version: "1",
+    source: "fixture",
+    aggregateType: "document_identity",
+    aggregateId: documentIdentityId,
+    payload: {
+      organizationId: context.organization.id,
+      documentSetId: context.documentSet.id,
+      documentId: context.document.id,
+      documentVersionId: context.version.id,
+      documentIdentityId
+    }
+  });
 }
 
 async function createReadApiHttpFixture(database: TestDb) {

@@ -34,6 +34,19 @@ export type EstimateWarning = {
   readonly severity: "info" | "warning" | "error";
 };
 
+export type EstimateProjectContext = {
+  readonly projectName?: EstimateTypedField<string>;
+  readonly workObjectName?: EstimateTypedField<string>;
+  readonly workKind?: EstimateTypedField<string>;
+  readonly stageName?: EstimateTypedField<string>;
+  readonly siteName?: EstimateTypedField<string>;
+  readonly facilityName?: EstimateTypedField<string>;
+  readonly subfacilityName?: EstimateTypedField<string>;
+  readonly workScope?: EstimateTypedField<string>;
+  readonly parseStatus: "parsed" | "partial" | "missing";
+  readonly warnings: readonly EstimateWarning[];
+};
+
 export type EstimateTemplateMatch = {
   readonly templateId: string;
   readonly kind: EstimateXlsxKind;
@@ -120,6 +133,7 @@ export type LocalEstimateHeader = {
   readonly estimateNumber?: EstimateTypedField<string>;
   readonly constructionName?: EstimateTypedField<string>;
   readonly workName?: EstimateTypedField<string>;
+  readonly projectContext?: EstimateProjectContext;
   readonly basis?: EstimateTypedField<string>;
   readonly priceLevel?: EstimateTypedField<string>;
   readonly estimatedCost?: EstimateTypedField<number>;
@@ -494,6 +508,10 @@ function parseCommonHeader(sheet: SheetCells): LocalEstimateHeader {
   const construction = findCell(sheet, (cell) =>
     normalizeText(cell.value).includes("магистральный газопровод")
   );
+  const workFromLabel = valueAboveLabel(sheet, [
+    "наименование работ и затрат",
+    "наименование объекта"
+  ]);
   const work = findCell(sheet, (cell) => normalizeText(cell.value).startsWith("на строительные работы"));
   const basisLabel = findCell(sheet, (cell) => normalizeText(cell.value).startsWith("основание"));
   const basis = basisLabel ? nextCellValueOnRow(sheet, basisLabel) : undefined;
@@ -506,7 +524,12 @@ function parseCommonHeader(sheet: SheetCells): LocalEstimateHeader {
   const constructionName = construction
     ? typedString(construction.value, construction, "constructionName")
     : undefined;
-  const workName = work ? typedString(stripLeadingNa(work.value), work, "workName") : undefined;
+  const workCell = workFromLabel ?? work;
+  const workName = workCell ? typedString(stripLeadingNa(workCell.value), workCell, "workName") : undefined;
+  const projectContext = buildEstimateProjectContext({
+    ...(constructionName ? { constructionName } : {}),
+    ...(workName ? { workName } : {})
+  });
   const basisField = basis ? typedString(basis.value, basis, "basis") : undefined;
   const priceLevelField = priceLevel
     ? typedString(priceLevel.value, priceLevel, "priceLevel")
@@ -520,11 +543,241 @@ function parseCommonHeader(sheet: SheetCells): LocalEstimateHeader {
     ...(estimateNumber ? { estimateNumber } : {}),
     ...(constructionName ? { constructionName } : {}),
     ...(workName ? { workName } : {}),
+    ...(projectContext ? { projectContext } : {}),
     ...(basisField ? { basis: basisField } : {}),
     ...(priceLevelField ? { priceLevel: priceLevelField } : {}),
     ...(estimatedCost ? { estimatedCost } : {}),
     ...(laborCost ? { laborCost } : {}),
     ...(laborHours ? { laborHours } : {})
+  };
+}
+
+export function buildEstimateProjectContext(input: {
+  readonly constructionName?: EstimateTypedField<string>;
+  readonly workName?: EstimateTypedField<string>;
+}): EstimateProjectContext | undefined {
+  const warnings: EstimateWarning[] = [];
+  const constructionNameValue = input.constructionName?.value;
+  const workNameValue = input.workName?.value;
+  const projectName = input.constructionName && constructionNameValue
+    ? derivedString(extractProjectName(constructionNameValue), input.constructionName, "projectName", 0.75)
+    : undefined;
+  const workObjectName = input.workName && workNameValue
+    ? derivedString(workNameValue, input.workName, "workObjectName", 0.9)
+    : undefined;
+  const parsedWork = workNameValue ? parseWorkObjectName(workNameValue) : {};
+  const fallbackConstructionSegments = splitNameSegments(constructionNameValue ?? "");
+  const stageName = derivedString(
+    parsedWork.stageName ?? fallbackConstructionSegments.find(isStageSegment),
+    input.workName ?? input.constructionName,
+    "stageName",
+    parsedWork.stageName ? 0.8 : 0.65
+  );
+  const siteName = derivedString(
+    parsedWork.siteName ?? fallbackConstructionSegments.find(isSiteSegment),
+    input.workName ?? input.constructionName,
+    "siteName",
+    parsedWork.siteName ? 0.8 : 0.65
+  );
+  const workKind = derivedString(parsedWork.workKind, input.workName, "workKind", 0.75);
+  const facilityName = derivedString(parsedWork.facilityName, input.workName, "facilityName", 0.65);
+  const subfacilityName = derivedString(
+    parsedWork.subfacilityName,
+    input.workName,
+    "subfacilityName",
+    0.55
+  );
+  const workScope = derivedString(parsedWork.workScope, input.workName, "workScope", 0.5);
+
+  if (workObjectName && !facilityName) {
+    warnings.push({
+      code: "estimate_project_context.facility_not_extracted",
+      message: "Work/object name was found, but facility segment could not be isolated heuristically.",
+      severity: "warning"
+    });
+  }
+  if (subfacilityName || workScope) {
+    warnings.push({
+      code: "estimate_project_context.work_name_contains_extra_scope",
+      message: "Work/object name contains additional segments after the facility name.",
+      severity: "info"
+    });
+  }
+
+  const parseStatus: EstimateProjectContext["parseStatus"] =
+    projectName && (facilityName || siteName || stageName)
+      ? "parsed"
+      : projectName || workObjectName
+        ? "partial"
+        : "missing";
+  if (parseStatus === "missing") {
+    return undefined;
+  }
+  return {
+    ...(projectName ? { projectName } : {}),
+    ...(workObjectName ? { workObjectName } : {}),
+    ...(workKind ? { workKind } : {}),
+    ...(stageName ? { stageName } : {}),
+    ...(siteName ? { siteName } : {}),
+    ...(facilityName ? { facilityName } : {}),
+    ...(subfacilityName ? { subfacilityName } : {}),
+    ...(workScope ? { workScope } : {}),
+    parseStatus,
+    warnings
+  };
+}
+
+function parseWorkObjectName(value: string): {
+  readonly workKind?: string;
+  readonly stageName?: string;
+  readonly siteName?: string;
+  readonly facilityName?: string;
+  readonly subfacilityName?: string;
+  readonly workScope?: string;
+} {
+  const segments = splitNameSegments(stripLeadingNa(value));
+  if (segments.length === 0) return {};
+
+  const workKindIndex = isWorkKindSegment(segments[0] ?? "") ? 0 : -1;
+  const stageIndex = segments.findIndex(isStageSegment);
+  const siteIndex = segments.findIndex(isSiteSegment);
+  const excluded = new Set([workKindIndex, stageIndex, siteIndex].filter((index) => index >= 0));
+  const workKind = workKindIndex === 0 ? segments[0] : undefined;
+  const stageName = stageIndex >= 0 ? normalizeStageName(segments[stageIndex] ?? "") : undefined;
+  const siteParts = siteIndex >= 0 ? splitSiteSegment(segments[siteIndex] ?? "") : undefined;
+  const siteName = siteParts?.siteName;
+  const candidateSegments = segments
+    .map((segment, index) => ({ segment, index }))
+    .filter(({ segment, index }) => !excluded.has(index) && !isDescriptorSegment(segment));
+  if (siteParts?.tail) {
+    candidateSegments.push({
+      segment: siteParts.tail,
+      index: siteIndex + 0.1
+    });
+  }
+  candidateSegments.sort((left, right) => left.index - right.index);
+  const preferred = preferredFacilitySegments(candidateSegments, stageIndex, siteIndex, workKindIndex);
+  const facilityName = preferred[0]?.segment;
+  const subfacilityName = preferred.length >= 3 ? preferred[1]?.segment : undefined;
+  const workScopeStart = subfacilityName ? 2 : 1;
+  const workScope = preferred
+    .slice(workScopeStart)
+    .map((entry) => entry.segment)
+    .join(". ");
+
+  return {
+    ...(workKind ? { workKind } : {}),
+    ...(stageName ? { stageName } : {}),
+    ...(siteName ? { siteName } : {}),
+    ...(facilityName ? { facilityName } : {}),
+    ...(subfacilityName ? { subfacilityName } : {}),
+    ...(workScope ? { workScope } : {})
+  };
+}
+
+function splitSiteSegment(value: string): {
+  readonly siteName: string;
+  readonly tail?: string;
+} {
+  const normalized = normalizeDisplayText(value);
+  const quotedSiteMatch = /^([^\s]+\s*[-]?\s*\d+\s+"[^"]+")\s*(.+)?$/iu.exec(normalized);
+  if (!quotedSiteMatch) {
+    return { siteName: normalized };
+  }
+
+  const siteName = normalizeDisplayText(quotedSiteMatch[1] ?? normalized);
+  const tail = normalizeDisplayText(quotedSiteMatch[2] ?? "");
+  return {
+    siteName,
+    ...(tail ? { tail } : {})
+  };
+}
+
+function preferredFacilitySegments(
+  candidates: readonly { readonly segment: string; readonly index: number }[],
+  stageIndex: number,
+  siteIndex: number,
+  workKindIndex: number
+): readonly { readonly segment: string; readonly index: number }[] {
+  if (siteIndex >= 0) {
+    const afterSite = candidates.filter((candidate) => candidate.index > siteIndex);
+    if (afterSite.length > 0) return afterSite;
+  }
+  if (stageIndex >= 0) {
+    const afterStage = candidates.filter((candidate) => candidate.index > stageIndex);
+    if (afterStage.length > 0) return afterStage;
+  }
+  const firstStructuralIndex = [stageIndex, siteIndex].filter((index) => index >= 0).sort((left, right) => left - right)[0];
+  if (firstStructuralIndex !== undefined) {
+    const beforeStructural = candidates.filter(
+      (candidate) => candidate.index > workKindIndex && candidate.index < firstStructuralIndex
+    );
+    if (beforeStructural.length > 0) return beforeStructural;
+  }
+  return candidates.filter((candidate) => candidate.index > workKindIndex);
+}
+
+function extractProjectName(value: string | undefined): string | undefined {
+  const normalized = normalizeDisplayText(value ?? "");
+  if (!normalized) return undefined;
+  const stageMatch = /\s+этап\.?\s*\d+(?:[./]\d+)?/iu.exec(normalized);
+  const beforeStage = stageMatch?.index ? normalized.slice(0, stageMatch.index) : normalized;
+  return normalizeDisplayText(splitNameSegments(beforeStage)[0] ?? beforeStage);
+}
+
+function splitNameSegments(value: string): string[] {
+  const decimalPlaceholder = "__ESTIMATE_DECIMAL_DOT__";
+  return normalizeDisplayText(value)
+    .replace(/(\d+)\.(\d+)/g, `$1${decimalPlaceholder}$2`)
+    .split(/\.\s*/u)
+    .map((part) => normalizeDisplayText(part.replaceAll(decimalPlaceholder, ".")))
+    .filter(Boolean);
+}
+
+function normalizeDisplayText(value: string): string {
+  return value
+    .trim()
+    .replace(/[«»“”]/g, "\"")
+    .replace(/[–—−]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([.,;:])/g, "$1")
+    .replace(/[.,;:\s]+$/u, "");
+}
+
+function isWorkKindSegment(value: string): boolean {
+  return /(?:строительн|монтажн|пусконаладочн|материал|оборудован|мтр|шлейф)/iu.test(value);
+}
+
+function isStageSegment(value: string): boolean {
+  return /^этап\.?\s*\d+(?:[./]\d+)?/iu.test(normalizeDisplayText(value));
+}
+
+function isSiteSegment(value: string): boolean {
+  return /^кс\s*[-]?\s*\d+/iu.test(normalizeDisplayText(value));
+}
+
+function isDescriptorSegment(value: string): boolean {
+  return /^(?:один|одна|одно|два|две|три|четыре)\s+технологическ/iu.test(normalizeDisplayText(value));
+}
+
+function normalizeStageName(value: string): string {
+  return normalizeDisplayText(value).replace(/^этап\.?\s*/iu, "Этап ");
+}
+
+function derivedString(
+  value: string | undefined,
+  source: EstimateTypedField<string> | undefined,
+  field: string,
+  confidence: number
+): EstimateTypedField<string> | undefined {
+  const normalized = normalizeDisplayText(value ?? "");
+  if (!normalized) return undefined;
+  return {
+    raw: value ?? normalized,
+    value: normalized,
+    normalized,
+    confidence,
+    source: source?.source.map((reference) => ({ ...reference, field })) ?? []
   };
 }
 
@@ -715,6 +968,29 @@ function nextCellValueOnRow(sheet: SheetCells, labelCell: XlsxCell): XlsxCell | 
     .get(labelCell.rowIndex)
     ?.filter((cell) => cell.columnIndex > labelCell.columnIndex && normalizeText(cell.value) !== normalizeText(labelCell.value))
     .sort((left, right) => left.columnIndex - right.columnIndex)[0];
+}
+
+function valueAboveLabel(
+  sheet: SheetCells,
+  labels: readonly string[],
+  maxLookbackRows = 4
+): XlsxCell | undefined {
+  const labelCell = findCell(sheet, (cell) => {
+    const normalized = normalizeText(cell.value);
+    return labels.every((label) => normalized.includes(normalizeText(label)));
+  });
+  if (!labelCell) return undefined;
+  for (let rowIndex = labelCell.rowIndex - 1; rowIndex >= labelCell.rowIndex - maxLookbackRows; rowIndex -= 1) {
+    const row = sheet.rows.get(rowIndex) ?? [];
+    const candidates = row
+      .filter((cell) => normalizeDisplayText(cell.value).length > 0)
+      .filter((cell) => !normalizeText(cell.value).startsWith("("))
+      .filter((cell) => !labels.some((label) => normalizeText(cell.value).includes(normalizeText(label))))
+      .sort((left, right) => right.value.length - left.value.length);
+    const candidate = candidates[0];
+    if (candidate) return candidate;
+  }
+  return undefined;
 }
 
 function readLabeledNumber(
