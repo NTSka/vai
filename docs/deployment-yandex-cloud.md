@@ -65,5 +65,6 @@ Set these values for the COI compose runtime:
 - `JWT_REFRESH_SECRET`
 - `AUTH_COOKIE_SECURE=false` when serving the MVP over plain HTTP.
   Use `true` once the public entrypoint is HTTPS.
+- `WEB_ORIGIN`, for example `http://<public-ip>` or the HTTPS domain.
 
 The backend and worker use `cv-ocr-service:50051` inside the compose network.
