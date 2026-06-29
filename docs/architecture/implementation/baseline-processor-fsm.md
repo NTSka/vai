@@ -153,6 +153,7 @@ Output facts:
 
 - extracted `StoredFile` records;
 - provenance link from extracted file to source archive;
+- accepted parse-candidate ids after duplicate format priority is applied;
 - `document_set.archive_unpacked` event.
 
 The uploaded archive must remain stored even when unpacking fails.

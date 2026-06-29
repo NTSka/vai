@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Readable } from "node:stream";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
 
 import {
   createBaselineFactsRepository,
@@ -8,6 +9,7 @@ import {
   createDocumentIntakeRepository,
   createProjectStructureRepository
 } from "../../infrastructure/persistence/repositories.js";
+import * as schema from "../../infrastructure/persistence/schema/index.js";
 import { baselineWarningSchema } from "../../baseline-processing/warnings.js";
 import { HttpError } from "../http-error.js";
 
@@ -491,10 +493,10 @@ export async function registerBackendReadApiRoutes(
       const stream = await app.objectStorage.getObject({ bucket, key });
       reply
         .type(source.storedFile.mimeType ?? "application/octet-stream")
-        .header(
-          "content-disposition",
-          `${query.disposition}; filename="${source.storedFile.originalName.replaceAll('"', "")}"`
-        );
+        .header("content-disposition", contentDispositionHeader(
+          query.disposition,
+          source.storedFile.originalName
+        ));
 
       return reply.send(stream);
     }
@@ -738,15 +740,59 @@ async function loadSourceDocument(
   if (!source) {
     throw new HttpError(404, "not_found", "Source document not found");
   }
-  if (source.storedFile.purpose !== "original_upload") {
+  if (!(await isViewableSourceFile(app, organizationId, source.storedFile))) {
     throw new HttpError(404, "not_found", "Source document not found");
   }
 
   return source;
 }
 
+async function isViewableSourceFile(
+  app: FastifyInstance,
+  organizationId: string,
+  storedFile: {
+    readonly id: string;
+    readonly purpose: "original_upload" | "generated_artifact" | "export";
+  }
+): Promise<boolean> {
+  if (storedFile.purpose === "original_upload") {
+    return true;
+  }
+
+  if (storedFile.purpose !== "generated_artifact") {
+    return false;
+  }
+
+  const [provenance] = await requireDrizzle(app)
+    .select({ childFileId: schema.storedFileProvenance.childFileId })
+    .from(schema.storedFileProvenance)
+    .where(
+      and(
+        eq(schema.storedFileProvenance.organizationId, organizationId),
+        eq(schema.storedFileProvenance.childFileId, storedFile.id),
+        eq(schema.storedFileProvenance.relation, "extracted_from_archive")
+      )
+    )
+    .limit(1);
+
+  return provenance !== undefined;
+}
+
 function canInlineView(mimeType: string | null): boolean {
   return mimeType === "application/pdf" || mimeType?.startsWith("image/") === true;
+}
+
+function contentDispositionHeader(disposition: "inline" | "attachment", fileName: string): string {
+  const fallback = asciiFileNameFallback(fileName);
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+function asciiFileNameFallback(fileName: string): string {
+  const sanitized = fileName
+    .replaceAll('"', "")
+    .replace(/[^\x20-\x7E]/g, "_")
+    .trim();
+  return sanitized.length > 0 ? sanitized : "source-document";
 }
 
 function normalizedSourceFormat(storedFile: {

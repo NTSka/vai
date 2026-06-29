@@ -15,10 +15,21 @@ const tree: ProjectTree = {
 };
 
 describe("buildProjectTreeRows", () => {
-  test("sorts siblings and includes root-level children by default", () => {
+  test("shows only root and fallback groups when nodes are collapsed", () => {
     const rows = buildProjectTreeRows({
       tree,
       expanded: new Set(),
+      search: ""
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["root", "unplaced"]);
+    expect(rows.find((row) => row.id === "root")?.hasChildren).toBe(true);
+  });
+
+  test("sorts siblings and includes root-level children when root is expanded", () => {
+    const rows = buildProjectTreeRows({
+      tree,
+      expanded: new Set(["root"]),
       search: ""
     });
 
@@ -29,7 +40,7 @@ describe("buildProjectTreeRows", () => {
   test("includes descendants for expanded nodes", () => {
     const rows = buildProjectTreeRows({
       tree,
-      expanded: new Set(["a"]),
+      expanded: new Set(["root", "a"]),
       search: ""
     });
 

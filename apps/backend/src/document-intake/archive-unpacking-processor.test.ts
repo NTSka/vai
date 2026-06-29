@@ -58,6 +58,52 @@ describe("archive unpacking processor", () => {
     expect(fixture.jobStatuses).toEqual([]);
   });
 
+  it("keeps extracted duplicate files but accepts only XLSX for parsing", async () => {
+    const archive = await createZipFixture({
+      "docs/drawing.pdf": "pdf-content",
+      "docs/drawing.xlsx": "xlsx-content"
+    });
+    const fixture = createArchiveFixture({ archive });
+
+    await fixture.processor.execute({
+      organizationId: "organization-1",
+      jobId: "job-1"
+    });
+
+    expect(fixture.persistedFiles.map((file) => file.originalName).sort()).toEqual([
+      "drawing.pdf",
+      "drawing.xlsx"
+    ]);
+    const xlsxIndex = fixture.persistedFiles.findIndex(
+      (file) => file.originalName === "drawing.xlsx"
+    );
+    expect(xlsxIndex).toBeGreaterThanOrEqual(0);
+    expect(fixture.acceptedCalls).toEqual([
+      expect.objectContaining({
+        acceptedFileIds: [`extracted-file-${xlsxIndex + 1}`],
+        documentSetId: "document-set-1"
+      })
+    ]);
+  });
+
+  it("ignores unsupported archive entries while preserving supported files", async () => {
+    const archive = await createZipFixture({
+      "docs/drawing.pdf": "pdf-content",
+      "docs/service.xml": "<meta />"
+    });
+    const fixture = createArchiveFixture({ archive });
+
+    await fixture.processor.execute({
+      organizationId: "organization-1",
+      jobId: "job-1"
+    });
+
+    expect(fixture.persistedFiles.map((file) => file.originalName)).toEqual([
+      "drawing.pdf"
+    ]);
+    expect(fixture.acceptedCalls[0]?.acceptedFileIds).toEqual(["extracted-file-1"]);
+  });
+
   it("rejects unsafe ZIP paths before object uploads", async () => {
     expect(() =>
       validateArchiveEntries([

@@ -87,7 +87,7 @@ describe("input file validator processor", () => {
     expect(fixture.events).toHaveLength(0);
   });
 
-  it("makes unsupported archive formats visible as unsupported intake state", async () => {
+  it("schedules archive unpacking for archive inputs", async () => {
     const fixture = createProcessorFixture({
       storedFiles: [
         {
@@ -115,12 +115,15 @@ describe("input file validator processor", () => {
       jobId: "job-1"
     });
 
-    expect(fixture.documentSetStatuses).toEqual(["intake_processing", "failed"]);
-    expect(fixture.jobErrors[0]).toMatchObject({
-      code: "unsupported_archive",
-      details: {
-        warning: "archive_detected",
-        storedFileId: "stored-file-1"
+    expect(fixture.documentSetStatuses).toEqual(["intake_processing"]);
+    expect(fixture.jobStatuses).toEqual(["completed"]);
+    expect(fixture.enqueuedJobs[0]).toMatchObject({
+      processorId: "archive_unpacker",
+      processorVersion: "1.0.0",
+      jobType: "archive_unpacking",
+      payload: {
+        documentSetId: "document-set-1",
+        inputFileIds: ["stored-file-1"]
       }
     });
     expect(fixture.events).toHaveLength(0);
@@ -159,6 +162,48 @@ describe("input file validator processor", () => {
     expect(fixture.events[0]?.type).toBe("document_set.accepted");
   });
 
+  it("accepts only XLSX for duplicate parse candidates with the same base name", async () => {
+    const fixture = createProcessorFixture({
+      storedFiles: [
+        storedFile({
+          id: "pdf-file",
+          originalName: "source.pdf",
+          mimeType: "application/pdf",
+          extension: ".pdf"
+        }),
+        storedFile({
+          id: "xlsx-file",
+          originalName: "source.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          extension: ".xlsx"
+        }),
+        storedFile({
+          id: "notes-file",
+          originalName: "notes.txt",
+          mimeType: "text/plain",
+          extension: ".txt"
+        })
+      ]
+    });
+
+    await fixture.processor.execute({
+      organizationId: "organization-1",
+      jobId: "job-1"
+    });
+
+    expect(fixture.events[0]).toMatchObject({
+      payload: {
+        originalFileIds: ["pdf-file", "xlsx-file", "notes-file"],
+        acceptedFileIds: ["xlsx-file", "notes-file"]
+      }
+    });
+    expect(fixture.storedFiles.map((file) => file.id)).toEqual([
+      "pdf-file",
+      "xlsx-file",
+      "notes-file"
+    ]);
+  });
+
   it("marks the document set failed when validation dependencies fail unexpectedly", async () => {
     const fixture = createProcessorFixture({ failFindStoredFiles: true });
 
@@ -185,27 +230,18 @@ function createProcessorFixture(
   const jobStatuses: string[] = [];
   const jobErrors: unknown[] = [];
   const events: Parameters<EventingRepository["publish"]>[0][] = [];
+  const enqueuedJobs: Parameters<ProcessingRepository["enqueueOnceByCausation"]>[0][] = [];
   const storedFiles =
     overrides.storedFiles ??
     [
-      {
+      storedFile({
         id: "stored-file-1",
-        organizationId: "organization-1",
         originalName: "source.pdf",
         mimeType: "application/pdf",
-        extension: ".pdf",
-        sizeBytes: 128,
-        checksum: "checksum",
-        checksumAlgorithm: "sha256" as const,
-        storage: {
-          provider: "s3_compatible" as const,
-          bucket: "vai-local-files",
-          key: "original/source.pdf"
-        },
-        purpose: "original_upload" as const,
-        createdAt: new Date()
-      }
+        extension: ".pdf"
+      })
     ];
+  const inputFileIds = storedFiles.map((file) => file.id);
   let documentSetStatus:
     | "uploaded"
     | "intake_processing"
@@ -224,7 +260,7 @@ function createProcessorFixture(
         jobType: "input_file_validation",
         payload: {
           documentSetId: "document-set-1",
-          inputFileIds: ["stored-file-1"]
+          inputFileIds
         },
         status: "queued",
         scheduledAt: new Date(),
@@ -246,8 +282,28 @@ function createProcessorFixture(
     async enqueue() {
       throw new Error("not used");
     },
-    async enqueueOnceByCausation() {
-      throw new Error("not used");
+    async enqueueOnceByCausation(input) {
+      enqueuedJobs.push(input);
+      return {
+        id: `job-${enqueuedJobs.length + 1}`,
+        organizationId: input.organizationId,
+        processorId: input.processorId,
+        processorVersion: input.processorVersion,
+        jobType: input.jobType,
+        payload: input.payload,
+        status: "queued",
+        scheduledAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+        error: null,
+        attempts: 0,
+        maxAttempts: 3,
+        nextRunAt: null,
+        correlationId: input.correlationId ?? null,
+        causationId: input.causationId,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
     },
     async completeJob(input) {
       jobStatuses.push("completed");
@@ -259,7 +315,7 @@ function createProcessorFixture(
         jobType: "input_file_validation",
         payload: {
           documentSetId: "document-set-1",
-          inputFileIds: ["stored-file-1"]
+          inputFileIds
         },
         status: "completed",
         scheduledAt: new Date(),
@@ -285,7 +341,7 @@ function createProcessorFixture(
         jobType: "input_file_validation",
         payload: {
           documentSetId: "document-set-1",
-          inputFileIds: ["stored-file-1"]
+          inputFileIds
         },
         status: "completed",
         scheduledAt: new Date(),
@@ -312,7 +368,7 @@ function createProcessorFixture(
         jobType: "input_file_validation",
         payload: {
           documentSetId: "document-set-1",
-          inputFileIds: ["stored-file-1"]
+          inputFileIds
         },
         status: "failed",
         scheduledAt: new Date(),
@@ -338,7 +394,7 @@ function createProcessorFixture(
         jobType: "input_file_validation",
         payload: {
           documentSetId: "document-set-1",
-          inputFileIds: ["stored-file-1"]
+          inputFileIds
         },
         status: "cancelled",
         scheduledAt: new Date(),
@@ -363,7 +419,7 @@ function createProcessorFixture(
         jobType: "input_file_validation",
         payload: {
           documentSetId: "document-set-1",
-          inputFileIds: ["stored-file-1"]
+          inputFileIds
         },
         status: "queued",
         scheduledAt: new Date(),
@@ -390,7 +446,7 @@ function createProcessorFixture(
         organizationId: "organization-1",
         uploadedBy: "user-1",
         source: "manual_upload",
-        originalFileIds: ["stored-file-1"],
+        originalFileIds: inputFileIds,
         status: documentSetStatus,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -410,7 +466,7 @@ function createProcessorFixture(
         organizationId: input.organizationId,
         uploadedBy: "user-1",
         source: "manual_upload",
-        originalFileIds: ["stored-file-1"],
+        originalFileIds: inputFileIds,
         status: input.status,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -497,6 +553,32 @@ function createProcessorFixture(
     jobStatuses,
     jobErrors,
     events,
+    enqueuedJobs,
     storedFiles
+  };
+}
+
+function storedFile(input: {
+  readonly id: string;
+  readonly originalName: string;
+  readonly mimeType: string;
+  readonly extension: string;
+}) {
+  return {
+    id: input.id,
+    organizationId: "organization-1",
+    originalName: input.originalName,
+    mimeType: input.mimeType,
+    extension: input.extension,
+    sizeBytes: 128,
+    checksum: "checksum",
+    checksumAlgorithm: "sha256" as const,
+    storage: {
+      provider: "s3_compatible" as const,
+      bucket: "vai-local-files",
+      key: `original/${input.originalName}`
+    },
+    purpose: "original_upload" as const,
+    createdAt: new Date()
   };
 }

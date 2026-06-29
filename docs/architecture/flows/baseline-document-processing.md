@@ -108,6 +108,18 @@ create DocumentSet(status = uploaded)
 of stored files that should enter document registration. It does not mean that
 the full baseline processing pipeline has completed.
 
+When intake sees duplicate parse candidates with the same file name stem in
+different formats, it should keep every stored-file fact but accept only the
+highest-priority candidate for downstream parsing. The MVP priority is:
+
+```text
+xlsx > pdf
+```
+
+For example, if an archive contains both `drawing.pdf` and `drawing.xlsx`, both
+files remain traceable in intake storage/provenance, but only the XLSX stored
+file id is included in `document_set.accepted.acceptedFileIds`.
+
 Archive provenance should be retained. At minimum, extracted files should be
 traceable to the uploaded archive that produced them.
 

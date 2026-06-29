@@ -1819,6 +1819,106 @@ describe("Phase 8 backend read APIs", () => {
     await app.close();
   });
 
+  dbIt("serves source content for files extracted from uploaded archives", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createOrganizationContext(database);
+    const intake = createDocumentIntakeRepository(database);
+    const registry = createDocumentRegistryRepository(database);
+    const archiveFile = await intake.createStoredFile({
+      organizationId: context.organization.id,
+      originalName: "archive.7z",
+      mimeType: "application/x-7z-compressed",
+      extension: ".7z",
+      sizeBytes: 1024,
+      checksum: `checksum-${randomUUID()}`,
+      checksumAlgorithm: "sha256",
+      storage: {
+        provider: "s3_compatible",
+        bucket: "vai-local-files",
+        key: `original/${randomUUID()}.7z`
+      },
+      purpose: "original_upload"
+    });
+    const extractedFile = await intake.createStoredFile({
+      organizationId: context.organization.id,
+      originalName: "ПЗ источник.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf",
+      sizeBytes: 512,
+      checksum: `checksum-${randomUUID()}`,
+      checksumAlgorithm: "sha256",
+      storage: {
+        provider: "s3_compatible",
+        bucket: "vai-local-files",
+        key: `archive-extractions/${randomUUID()}.pdf`
+      },
+      purpose: "generated_artifact"
+    });
+    const documentSet = await intake.createDocumentSet({
+      organizationId: context.organization.id,
+      uploadedBy: context.user.id,
+      source: "manual_upload",
+      originalFileIds: [archiveFile.id],
+      status: "accepted"
+    });
+    await intake.createArchiveProvenance({
+      organizationId: context.organization.id,
+      childFileId: extractedFile.id,
+      sourceFileId: archiveFile.id,
+      documentSetId: documentSet.id,
+      relation: "extracted_from_archive",
+      pathInSource: "ОС ЛС/ПЗ источник.pdf"
+    });
+    const document = await registry.createDocument({
+      organizationId: context.organization.id
+    });
+    const version = await registry.createDocumentVersion({
+      organizationId: context.organization.id,
+      documentId: document.id,
+      documentSetId: documentSet.id,
+      storedFileId: extractedFile.id,
+      versionNumber: 1
+    });
+
+    const app = await buildApp({
+      config,
+      logger: false,
+      database: {
+        query: getClient().query.bind(getClient()),
+        drizzle: database
+      },
+      objectStorage: createObjectStorageDouble("extracted-source-content"),
+      auth: createReadApiAuthOptions(context.organization.id, ["document.view"])
+    });
+    const cookie = `vai_access_token=${createReadApiJwt().issuePair("read-api-user").accessToken}`;
+
+    const metadata = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${version.id}`,
+      headers: { cookie }
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json()).toMatchObject({
+      sourceFile: {
+        originalName: "ПЗ источник.pdf",
+        mimeType: "application/pdf"
+      }
+    });
+
+    const content = await app.inject({
+      method: "GET",
+      url: `/organizations/${context.organization.id}/source-documents/${version.id}/content?disposition=inline`,
+      headers: { cookie }
+    });
+    expect(content.statusCode).toBe(200);
+    expect(content.body).toBe("extracted-source-content");
+    expect(content.headers["content-disposition"]).toContain("filename*=UTF-8''");
+
+    await app.close();
+  });
+
   dbIt("returns XLSX dedicated viewer data from workbook and cell artifacts", async () => {
     const database = getDatabase();
     if (!database) return;

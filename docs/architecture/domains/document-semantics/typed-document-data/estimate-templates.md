@@ -197,7 +197,8 @@ schema: estimate.resource_statement
 
 Recognition anchors:
 
-- title contains `ВЕДОМОСТЬ РЕСУРСОВ`;
+- title or leading resource block contains `ВЕДОМОСТЬ РЕСУРСОВ` or
+  `РЕСУРСЫ ПОДРЯДЧИКА`;
 - table header contains labels equivalent to `Обоснование`, `Наименование`,
   `Единица измерения`, `Общее кол-во`, and current-price cost columns;
 - resource groups contain labels such as `Трудозатраты`, `Машины и механизмы`,

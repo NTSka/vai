@@ -16,6 +16,7 @@ import type { ObjectStorageClient } from "../infrastructure/object-storage/plugi
 import type { DocumentIntakeRepository } from "../infrastructure/persistence/repositories/document-intake.js";
 import type { EventingRepository } from "../infrastructure/persistence/repositories/eventing.js";
 import type { ProcessingRepository } from "../infrastructure/persistence/repositories/processing-orchestration.js";
+import { selectAcceptedFileIdsByParsePriority, type IntakeFileCandidate } from "./file-priority.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -26,6 +27,7 @@ const archiveUnpackingPayloadSchema = z.object({
 
 const maxArchiveEntries = 10_000;
 const maxArchiveExpandedBytes = 50 * 1024 * 1024 * 1024;
+const sevenZipMaxOutputBufferBytes = 128 * 1024 * 1024;
 const supportedExtractedExtensions = new Set([".pdf", ".xlsx", ".xls"]);
 
 export type ExecuteArchiveUnpackingJobInput = {
@@ -127,13 +129,13 @@ export function createArchiveUnpackingProcessor(input: {
           return;
         }
 
-        const outputFileIds: string[] = [];
+        const outputFiles: IntakeFileCandidate[] = [];
         for (const storedFile of storedFiles) {
           const extension = normalizeExtension(
             storedFile.extension ?? path.extname(storedFile.originalName)
           );
           if (extension === ".zip" || extension === ".7z" || extension === ".rar") {
-            outputFileIds.push(
+            outputFiles.push(
               ...(await unpackArchive({
                 bucket: input.bucket,
                 organizationId: executionInput.organizationId,
@@ -147,10 +149,14 @@ export function createArchiveUnpackingProcessor(input: {
             continue;
           }
 
-          outputFileIds.push(storedFile.id);
+          outputFiles.push({
+            id: storedFile.id,
+            originalName: storedFile.originalName,
+            extension: storedFile.extension
+          });
         }
 
-        if (outputFileIds.length === 0) {
+        if (outputFiles.length === 0) {
           await failJobAndSet({
             processing: input.processing,
             documentIntake: input.documentIntake,
@@ -167,7 +173,10 @@ export function createArchiveUnpackingProcessor(input: {
           documentSetId: documentSet.id,
           organizationId: documentSet.organizationId,
           originalFileIds: documentSet.originalFileIds,
-          acceptedFileIds: outputFileIds,
+          acceptedFileIds: selectAcceptedFileIdsByParsePriority({
+            fileIds: outputFiles.map((file) => file.id),
+            files: outputFiles
+          }),
           jobId: job.id,
           ...(job.correlationId ? { correlationId: job.correlationId } : {})
         });
@@ -195,7 +204,7 @@ async function unpackArchive(input: {
   };
   readonly objectStorage: ObjectStorageClient;
   readonly persistExtractedArchiveFiles: PersistExtractedArchiveFiles;
-}): Promise<string[]> {
+}): Promise<IntakeFileCandidate[]> {
   const tempRoot = path.join(tmpdir(), "vai2-archive-unpacking", randomUUID());
   const archiveTempPath = path.join(tempRoot, `source${input.archiveExtension}`);
   const extractDirectory = path.join(tempRoot, "extracted");
@@ -268,14 +277,18 @@ async function unpackArchive(input: {
     }
 
     try {
-      return [
-        ...(await input.persistExtractedArchiveFiles({
-          organizationId: input.organizationId,
-          documentSetId: input.documentSetId,
-          sourceFileId: input.archive.id,
-          files: extractedFacts
-        }))
-      ];
+      const extractedFileIds = await input.persistExtractedArchiveFiles({
+        organizationId: input.organizationId,
+        documentSetId: input.documentSetId,
+        sourceFileId: input.archive.id,
+        files: extractedFacts
+      });
+      return extractedFacts.map((file, index) => ({
+        id: extractedFileIds[index] ?? "",
+        originalName: file.originalName,
+        extension: file.extension,
+        dedupeName: file.pathInSource
+      })).filter((file) => file.id.length > 0);
     } catch (error) {
       await Promise.allSettled(
         uploadedObjects.map((key) =>
@@ -301,14 +314,20 @@ async function extractWith7Zip(input: {
     input.archivePath,
     `-o${input.extractDirectory}`,
     "-y",
-    "-bd"
-  ]);
+    "-bd",
+    "-bso0",
+    "-bsp0"
+  ], { maxBuffer: sevenZipMaxOutputBufferBytes });
 }
 
 async function inspectWith7Zip(input: {
   readonly archivePath: string;
 }): Promise<Array<{ readonly relativePath: string; readonly sizeBytes: number; readonly isDirectory: boolean }>> {
-  const { stdout } = await execFileAsync(path7za, ["l", "-slt", input.archivePath]);
+  const { stdout } = await execFileAsync(
+    path7za,
+    ["l", "-slt", input.archivePath],
+    { maxBuffer: sevenZipMaxOutputBufferBytes }
+  );
   return parse7ZipListing(stdout);
 }
 
@@ -417,10 +436,6 @@ export function validateArchiveEntries(
 
   for (const file of files) {
     assertSafeArchivePath(file.relativePath);
-    const extension = normalizeExtension(path.extname(file.relativePath));
-    if (extension && !supportedExtractedExtensions.has(extension)) {
-      throw new Error(`Archive entry type is not supported: ${file.relativePath}`);
-    }
   }
 }
 

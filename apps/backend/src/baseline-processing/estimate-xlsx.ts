@@ -272,7 +272,9 @@ function detectResourceStatement(sheet: SheetCells): EstimateTemplateMatch | und
   const evidence: EstimateSourceReference[] = [];
   let score = 0;
 
-  const title = findCell(sheet, (cell) => normalizeText(cell.value).includes("ведомость ресурсов"));
+  const title = findCell(sheet, (cell) =>
+    includesAny(normalizeText(cell.value), ["ведомость ресурсов", "ресурсы подрядчика"])
+  );
   if (title) {
     score += 5;
     evidence.push({ ...title.source, field: "title" });

@@ -8,6 +8,25 @@ import { buildXlsxCellsPayload, type XlsxCellCollectionPayload } from "./xlsx-ar
 import { detectEstimateXlsxTemplates, parseEstimateXlsx } from "./estimate-xlsx.js";
 
 describe("estimate XLSX templates", () => {
+  it("classifies every estimate XLSX fixture by document form", async () => {
+    const fixtures = await readEstimateFixtureCellPayloads();
+    const expectedKinds = new Map([
+      ["03 97077 04-14-121-02 ЛС.xlsx", "local_estimate_calculation"],
+      ["03 97077 04-14-121-02 РС.xlsx", "resource_statement"],
+      ["03_88120_02-01-102-19 - ЛСР1.xlsx", "local_estimate_calculation"],
+      ["03_88120_02-01-102-19 - РС1.xlsx", "resource_statement"]
+    ]);
+
+    expect(fixtures.map((fixture) => fixture.fileName).sort()).toEqual(
+      [...expectedKinds.keys()].sort()
+    );
+    for (const fixture of fixtures) {
+      const parsed = parseEstimateXlsx({ cells: fixture.cells.cellCollection.cells });
+      expect(parsed?.kind, fixture.fileName).toBe(expectedKinds.get(fixture.fileName));
+      expect(parsed?.recognition.status, fixture.fileName).toBe("resolved");
+    }
+  });
+
   it("detects and parses the local resource estimate calculation fixture", async () => {
     const parsed = await parseFixtureByExpectedKind("local_estimate_calculation");
 
@@ -102,14 +121,26 @@ describe("estimate XLSX templates", () => {
 
   it("exposes template matches separately from parsing", async () => {
     const fixtures = await readEstimateFixtureCellPayloads();
-    const matches = fixtures.flatMap((fixture) =>
-      detectEstimateXlsxTemplates({ cells: fixture.cells.cellCollection.cells })
+    const matchesByFile = new Map(
+      fixtures.map((fixture) => [
+        fixture.fileName,
+        detectEstimateXlsxTemplates({ cells: fixture.cells.cellCollection.cells })
+      ])
     );
 
-    expect(matches.map((match) => match.templateId).sort()).toEqual([
+    expect(
+      matchesByFile.get("03_88120_02-01-102-19 - РС1.xlsx")?.[0]
+    ).toMatchObject({
+      templateId: "minstroy-421pr.resource_statement",
+      kind: "resource_statement",
+      status: "resolved"
+    });
+    expect(
+      [...matchesByFile.values()].flatMap((matches) => matches.map((match) => match.templateId))
+    ).toEqual(expect.arrayContaining([
       "minstroy-421pr.local_estimate",
       "minstroy-421pr.resource_statement"
-    ]);
+    ]));
   });
 });
 

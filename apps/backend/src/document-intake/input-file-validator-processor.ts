@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { DocumentIntakeRepository } from "../infrastructure/persistence/repositories/document-intake.js";
 import type { EventingRepository } from "../infrastructure/persistence/repositories/eventing.js";
 import type { ProcessingRepository } from "../infrastructure/persistence/repositories/processing-orchestration.js";
+import { selectAcceptedFileIdsByParsePriority } from "./file-priority.js";
 
 const inputFileValidationPayloadSchema = z.object({
   documentSetId: z.string().min(1),
@@ -100,6 +101,31 @@ export function createInputFileValidatorProcessor(input: {
       }
 
       if (documentSet.status === "accepted") {
+        const storedFiles = await input.documentIntake.findStoredFiles({
+          organizationId: executionInput.organizationId,
+          ids: payload.inputFileIds
+        });
+
+        if (hasArchive(storedFiles)) {
+          await input.processing.enqueueOnceByCausation({
+            organizationId: executionInput.organizationId,
+            processorId: "archive_unpacker",
+            processorVersion: "1.0.0",
+            jobType: "archive_unpacking",
+            payload: {
+              documentSetId: documentSet.id,
+              inputFileIds: payload.inputFileIds
+            },
+            causationId: job.id,
+            ...(job.correlationId ? { correlationId: job.correlationId } : {})
+          });
+          await input.processing.completeJob({
+            organizationId: executionInput.organizationId,
+            id: job.id
+          });
+          return;
+        }
+
         await input.completeAcceptedInputValidation({
           documentSetId: documentSet.id,
           organizationId: documentSet.organizationId,
@@ -139,11 +165,34 @@ export function createInputFileValidatorProcessor(input: {
           return;
         }
 
+        if (hasArchive(storedFiles)) {
+          await input.processing.enqueueOnceByCausation({
+            organizationId: executionInput.organizationId,
+            processorId: "archive_unpacker",
+            processorVersion: "1.0.0",
+            jobType: "archive_unpacking",
+            payload: {
+              documentSetId: documentSet.id,
+              inputFileIds: payload.inputFileIds
+            },
+            causationId: job.id,
+            ...(job.correlationId ? { correlationId: job.correlationId } : {})
+          });
+          await input.processing.completeJob({
+            organizationId: executionInput.organizationId,
+            id: job.id
+          });
+          return;
+        }
+
         await input.completeAcceptedInputValidation({
           documentSetId: documentSet.id,
           organizationId: documentSet.organizationId,
           originalFileIds: documentSet.originalFileIds,
-          acceptedFileIds: payload.inputFileIds,
+          acceptedFileIds: selectAcceptedFileIdsByParsePriority({
+            fileIds: payload.inputFileIds,
+            files: storedFiles
+          }),
           jobId: job.id,
           ...(job.correlationId ? { correlationId: job.correlationId } : {})
         });
@@ -182,7 +231,6 @@ function validateStoredFiles(input: {
   }
 
   for (const file of input.files) {
-    const extension = normalizeExtension(file.extension ?? path.extname(file.originalName));
     if (file.sizeBytes <= 0) {
       return {
         code: "empty_file",
@@ -199,22 +247,21 @@ function validateStoredFiles(input: {
       };
     }
 
-    if (isArchive(extension, file.mimeType)) {
-      return {
-        code: "unsupported_archive",
-        message: "Archive unpacking is not implemented in this MVP slice",
-        details: {
-          storedFileId: file.id,
-          originalName: file.originalName,
-          extension,
-          mimeType: file.mimeType,
-          warning: "archive_detected"
-        }
-      };
-    }
   }
 
   return undefined;
+}
+
+function hasArchive(
+  files: ReadonlyArray<{
+    readonly originalName: string;
+    readonly mimeType: string | null;
+    readonly extension: string | null;
+  }>
+): boolean {
+  return files.some((file) =>
+    isArchive(normalizeExtension(file.extension ?? path.extname(file.originalName)), file.mimeType)
+  );
 }
 
 async function failJobAndSet(input: {

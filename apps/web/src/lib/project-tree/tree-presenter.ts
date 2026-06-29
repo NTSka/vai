@@ -57,8 +57,7 @@ export function buildProjectTreeRows(input: {
     const pathTitles = [...parentTitles, treeTitle(node.title)];
     const pathCode = pathKeys.join(".");
     const ownMatch = filter.length === 0 || nodeMatches(node, pathKeys, pathTitles);
-    const shouldShowChildren =
-      includeAllAncestors || input.expanded.has(node.id) || depth === 0;
+    const shouldShowChildren = includeAllAncestors || input.expanded.has(node.id);
     let childRows: TreeRow[] = [];
     let descendantMatch = false;
 
