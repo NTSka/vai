@@ -12,6 +12,7 @@ COPY apps/backend ./apps/backend
 COPY apps/worker ./apps/worker
 
 RUN pnpm install --frozen-lockfile
+RUN chmod +x node_modules/.pnpm/7zip-bin@*/node_modules/7zip-bin/linux/x64/7za
 RUN pnpm --filter @vai/worker... build
 
 CMD ["node", "--enable-source-maps", "apps/worker/dist/index.js"]

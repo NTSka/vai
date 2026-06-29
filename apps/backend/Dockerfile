@@ -11,6 +11,7 @@ COPY packages ./packages
 COPY apps/backend ./apps/backend
 
 RUN pnpm install --frozen-lockfile
+RUN chmod +x node_modules/.pnpm/7zip-bin@*/node_modules/7zip-bin/linux/x64/7za
 RUN pnpm --filter @vai/backend... build
 
 EXPOSE 3000
