@@ -14,6 +14,10 @@ import type { ProcessingRepository } from "../infrastructure/persistence/reposit
 import type { ProjectStructureRepository } from "../infrastructure/persistence/repositories/project-structure.js";
 import type * as schema from "../infrastructure/persistence/schema/index.js";
 import type { CvOcrClient } from "../infrastructure/cv-ocr/client.js";
+import {
+  processingJobLogFields,
+  type ProcessingLogger
+} from "./telemetry.js";
 
 type ProcessingJob = typeof schema.processingJobs.$inferSelect;
 
@@ -58,11 +62,6 @@ export type ProcessorRuntime = {
   runNext(): Promise<"processed" | "idle">;
 };
 
-type ProcessingLogger = {
-  info(input: Record<string, unknown>, message?: string): void;
-  error(input: Record<string, unknown>, message?: string): void;
-};
-
 export function createProcessorRegistry(): ProcessorRegistry {
   const handlers = new Map<string, ProcessorHandler>();
 
@@ -89,7 +88,14 @@ export function createProcessorRuntime(input: {
         return "idle";
       }
       const startedAtMs = Date.now();
-      input.logger?.info(jobLogFields(job), "processing job started");
+      input.logger?.info(
+        {
+          event: "processing.job",
+          status: "started",
+          ...processingJobLogFields(job)
+        },
+        "processing job started"
+      );
 
       const handler = input.registry.find({
         processorId: job.processorId,
@@ -112,7 +118,9 @@ export function createProcessorRuntime(input: {
         });
         input.logger?.error(
           {
-            ...jobLogFields(job),
+            event: "processing.job",
+            status: "failed",
+            ...processingJobLogFields(job),
             durationMs: Date.now() - startedAtMs,
             errorCode: "unknown_processor"
           },
@@ -125,7 +133,9 @@ export function createProcessorRuntime(input: {
         await handler(job);
         input.logger?.info(
           {
-            ...jobLogFields(job),
+            event: "processing.job",
+            status: "completed",
+            ...processingJobLogFields(job),
             durationMs: Date.now() - startedAtMs
           },
           "processing job completed"
@@ -164,7 +174,9 @@ export function createProcessorRuntime(input: {
         }
         input.logger?.error(
           {
-            ...jobLogFields(job),
+            event: "processing.job",
+            status: "failed",
+            ...processingJobLogFields(job),
             durationMs: Date.now() - startedAtMs,
             errorCode: classified.code,
             retryable: classified.retryable,
@@ -175,19 +187,6 @@ export function createProcessorRuntime(input: {
         return "processed";
       }
     }
-  };
-}
-
-function jobLogFields(job: ProcessingJob): Record<string, unknown> {
-  return {
-    jobId: job.id,
-    processorId: job.processorId,
-    processorVersion: job.processorVersion,
-    jobType: job.jobType,
-    organizationId: job.organizationId,
-    correlationId: job.correlationId,
-    causationId: job.causationId,
-    attempt: job.attempts
   };
 }
 

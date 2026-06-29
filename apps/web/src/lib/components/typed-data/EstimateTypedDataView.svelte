@@ -215,6 +215,7 @@
 
   function recordTitle(): string {
     if (isResourceStatement) return "Ведомость ресурсов";
+    if (data.kind === "local_estimate_calculation") return "Локальный сметный расчет";
     if (isLocalEstimate) return "Локальная смета";
     return "Смета";
   }

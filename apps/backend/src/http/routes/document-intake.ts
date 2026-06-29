@@ -50,6 +50,7 @@ export async function registerDocumentIntakeRoutes(
   options: RegisterDocumentIntakeRoutesOptions = {}
 ): Promise<void> {
   await app.register(multipart, {
+    defCharset: "utf8",
     limits: {
       files: 20,
       fileSize: maxUploadFileSizeBytes

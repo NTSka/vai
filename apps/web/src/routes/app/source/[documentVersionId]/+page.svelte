@@ -12,6 +12,7 @@
     Plus
   } from "@lucide/svelte";
   import * as XLSX from "xlsx";
+  import * as cptable from "xlsx/dist/cpexcel.full.mjs";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { api, ApiError } from "$lib/api/client";
@@ -24,6 +25,8 @@
   type SheetColumn = XlsxSheet["columns"][number];
   type SheetRow = XlsxSheet["rows"][number];
   type SheetMerge = XlsxSheet["merges"][number];
+
+  XLSX.set_cptable(cptable);
 
   type RenderCell = {
     readonly key: string;
@@ -229,7 +232,8 @@
       }
       const workbook = XLSX.read(await response.arrayBuffer(), {
         type: "array",
-        cellDates: true
+        cellDates: true,
+        codepage: 1251
       });
       return xlsWorkbookToViewer(nextViewer, workbook);
     } catch {

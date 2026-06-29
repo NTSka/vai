@@ -4,7 +4,7 @@ import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { promisify, TextDecoder } from "node:util";
 import { pipeline } from "node:stream/promises";
 
 import { path7za } from "7zip-bin";
@@ -54,6 +54,12 @@ export type PersistExtractedArchiveFiles = (input: {
   readonly sourceFileId: string;
   readonly files: readonly PersistExtractedArchiveFileInput[];
 }) => Promise<readonly string[]>;
+
+type ArchiveEntry = {
+  readonly relativePath: string;
+  readonly sizeBytes: number;
+  readonly isDirectory: boolean;
+};
 
 export function createArchiveUnpackingProcessor(input: {
   readonly bucket: string;
@@ -219,10 +225,12 @@ async function unpackArchive(input: {
     });
     await pipeline(archiveStream, createWriteStream(archiveTempPath, { flags: "wx" }));
 
+    let entriesForPersisting: ArchiveEntry[];
     if (input.archiveExtension === ".rar") {
       const entries = await inspectRar({
         archivePath: archiveTempPath
       });
+      entriesForPersisting = entries;
       validateArchiveEntries(entries);
       await extractRar({
         archivePath: archiveTempPath,
@@ -232,6 +240,7 @@ async function unpackArchive(input: {
       const entries = await inspectWith7Zip({
         archivePath: archiveTempPath
       });
+      entriesForPersisting = entries;
       validateArchiveEntries(entries);
       await extractWith7Zip({
         archivePath: archiveTempPath,
@@ -239,12 +248,15 @@ async function unpackArchive(input: {
       });
     }
 
-    const extractedFiles = await listExtractedFiles(extractDirectory);
+    const extractedFiles = matchExtractedFilesToArchiveEntries(
+      await listExtractedFiles(extractDirectory),
+      entriesForPersisting
+    );
 
     const uploadedObjects: string[] = [];
     const extractedFacts: PersistExtractedArchiveFileInput[] = [];
     for (const extractedFile of extractedFiles) {
-      const extension = normalizeExtension(path.extname(extractedFile.relativePath));
+      const extension = normalizeExtension(path.extname(extractedFile.archiveRelativePath));
       if (!isSupportedExtractedExtension(extension)) {
         continue;
       }
@@ -255,7 +267,7 @@ async function unpackArchive(input: {
         input.organizationId,
         "archive-extractions",
         randomUUID(),
-        path.basename(extractedFile.relativePath)
+        path.basename(extractedFile.archiveRelativePath)
       ].join("/");
 
       await input.objectStorage.putObject({
@@ -267,12 +279,12 @@ async function unpackArchive(input: {
       uploadedObjects.push(storageKey);
 
       extractedFacts.push({
-        originalName: path.basename(extractedFile.relativePath),
+        originalName: path.basename(extractedFile.archiveRelativePath),
         extension,
         sizeBytes: fileFacts.sizeBytes,
         checksum: fileFacts.checksum,
         storageKey,
-        pathInSource: extractedFile.relativePath
+        pathInSource: extractedFile.archiveRelativePath
       });
     }
 
@@ -322,13 +334,13 @@ async function extractWith7Zip(input: {
 
 async function inspectWith7Zip(input: {
   readonly archivePath: string;
-}): Promise<Array<{ readonly relativePath: string; readonly sizeBytes: number; readonly isDirectory: boolean }>> {
+}): Promise<ArchiveEntry[]> {
   const { stdout } = await execFileAsync(
     path7za,
     ["l", "-slt", input.archivePath],
-    { maxBuffer: sevenZipMaxOutputBufferBytes }
+    { encoding: "buffer", maxBuffer: sevenZipMaxOutputBufferBytes }
   );
-  return parse7ZipListing(stdout);
+  return parse7ZipListing(decode7ZipOutput(stdout as Buffer));
 }
 
 async function extractRar(input: {
@@ -357,7 +369,7 @@ async function extractRar(input: {
 
 async function inspectRar(input: {
   readonly archivePath: string;
-}): Promise<Array<{ readonly relativePath: string; readonly sizeBytes: number; readonly isDirectory: boolean }>> {
+}): Promise<ArchiveEntry[]> {
   const extractor = await createExtractorFromFile({
     filepath: input.archivePath
   });
@@ -417,6 +429,70 @@ async function listExtractedFiles(root: string): Promise<
   return results;
 }
 
+function matchExtractedFilesToArchiveEntries(
+  extractedFiles: readonly {
+    readonly absolutePath: string;
+    readonly relativePath: string;
+    readonly sizeBytes: number;
+  }[],
+  archiveEntries: readonly ArchiveEntry[]
+): Array<{
+  readonly absolutePath: string;
+  readonly relativePath: string;
+  readonly archiveRelativePath: string;
+  readonly sizeBytes: number;
+}> {
+  const supportedEntries = archiveEntries
+    .filter((entry) => !entry.isDirectory)
+    .filter((entry) =>
+      isSupportedExtractedExtension(normalizeExtension(path.extname(entry.relativePath)))
+    );
+  const unusedEntryIndexes = new Set(supportedEntries.map((_, index) => index));
+
+  return extractedFiles.map((file) => {
+    const exactIndex = supportedEntries.findIndex(
+      (entry, index) =>
+        unusedEntryIndexes.has(index) &&
+        toArchiveRelativePath(entry.relativePath) === file.relativePath
+    );
+    const matchedIndex =
+      exactIndex >= 0
+        ? exactIndex
+        : findUniqueMatchingArchiveEntryIndex(supportedEntries, unusedEntryIndexes, file);
+
+    if (matchedIndex >= 0) {
+      unusedEntryIndexes.delete(matchedIndex);
+    }
+
+    return {
+      ...file,
+      archiveRelativePath:
+        matchedIndex >= 0
+          ? toArchiveRelativePath(supportedEntries[matchedIndex]?.relativePath ?? file.relativePath)
+          : file.relativePath
+    };
+  });
+}
+
+function findUniqueMatchingArchiveEntryIndex(
+  archiveEntries: readonly ArchiveEntry[],
+  unusedEntryIndexes: ReadonlySet<number>,
+  file: {
+    readonly relativePath: string;
+    readonly sizeBytes: number;
+  }
+): number {
+  const candidateIndexes = archiveEntries.flatMap((entry, index) =>
+    unusedEntryIndexes.has(index) &&
+    entry.sizeBytes === file.sizeBytes &&
+    normalizeExtension(path.extname(entry.relativePath)) ===
+      normalizeExtension(path.extname(file.relativePath))
+      ? [index]
+      : []
+  );
+  return candidateIndexes.length === 1 ? candidateIndexes[0] ?? -1 : -1;
+}
+
 export function validateArchiveEntries(
   entries: readonly {
     readonly relativePath: string;
@@ -441,12 +517,8 @@ export function validateArchiveEntries(
 
 function parse7ZipListing(
   stdout: string
-): Array<{ readonly relativePath: string; readonly sizeBytes: number; readonly isDirectory: boolean }> {
-  const entries: Array<{
-    readonly relativePath: string;
-    readonly sizeBytes: number;
-    readonly isDirectory: boolean;
-  }> = [];
+): ArchiveEntry[] {
+  const entries: ArchiveEntry[] = [];
   const blocks = stdout.split(/\r?\n\r?\n/);
 
   for (const block of blocks) {
@@ -475,6 +547,10 @@ function parse7ZipListing(
   }
 
   return entries;
+}
+
+function decode7ZipOutput(stdout: Buffer): string {
+  return new TextDecoder("cp866").decode(stdout);
 }
 
 async function hashFile(filePath: string): Promise<{

@@ -60,17 +60,9 @@ export function buildTypedDataPayload(input: {
   readonly contentArtifacts: readonly ContentArtifactLike[];
 }): Record<string, unknown> {
   const filenameSource = { kind: "filename", value: input.originalName };
-  const stage = inferDocumentationStage(input.stem);
-  const filenameCode = extractCodeCandidate(input.stem);
-  const filenameCodeCandidate = filenameCode
-    ? { value: filenameCode, source: filenameSource }
-    : undefined;
   const artifactCodeCandidates = extractCodesFromContentArtifacts(input.contentArtifacts);
   const artifactCodes = artifactCodeCandidates.map((candidate) => candidate.value);
-  const estimateReferenceCandidates = uniqueCodeCandidates([
-    ...(filenameCodeCandidate ? [filenameCodeCandidate] : []),
-    ...artifactCodeCandidates
-  ]);
+  const estimateReferenceCandidates = uniqueCodeCandidates(artifactCodeCandidates);
 
   if (input.family === "estimate") {
     return {
@@ -106,8 +98,7 @@ export function buildTypedDataPayload(input: {
       form: inferStatementForm(input.stem),
       source: "semantic_baseline",
       title: typedField(input.stem, [filenameSource]),
-      ownCodeCandidate: filenameCodeCandidate?.value,
-      ownCodeSource: filenameCodeCandidate?.source,
+      ownCodeCandidate: undefined,
       rows: artifactCodeCandidates.map((candidate, index) => ({
         rowNumber: index + 1,
         referencedDesignation: typedField(candidate.value, [candidate.source])
@@ -126,27 +117,20 @@ export function buildTypedDataPayload(input: {
       form: "rd_drawing_sheet",
       source: "semantic_baseline",
       mainInscription: {
-        documentDesignation: filenameCodeCandidate
-          ? typedField(filenameCodeCandidate.value, [filenameCodeCandidate.source])
-          : undefined,
-        documentationStage: stage ? typedField(stage, [filenameSource]) : undefined,
-        mark: typedField(parseCodeParts(filenameCodeCandidate?.value ?? "").mark, [
-          filenameSource
-        ])
+        documentDesignation: undefined,
+        documentationStage: undefined,
+        mark: undefined
       },
-      packageContext: buildPackageContext(filenameCodeCandidate?.value, filenameSource),
-      ownCodeCandidate: filenameCodeCandidate?.value,
-      ownCodeSource: filenameCodeCandidate?.source,
+      packageContext: undefined,
+      ownCodeCandidate: undefined,
       referenceCodeCandidates: [],
-      warnings: filenameCodeCandidate
-        ? []
-        : [
-            {
-              code: "drawing_designation_missing",
-              message: "Drawing designation was not found in available baseline sources.",
-              severity: "warning"
-            }
-          ]
+      warnings: [
+        {
+          code: "drawing_designation_missing",
+          message: "Drawing designation was not found in available baseline sources.",
+          severity: "warning"
+        }
+      ]
     };
   }
 
@@ -378,8 +362,22 @@ function extractCodeCandidate(value: string): string | undefined {
 
 function normalizeCodeValue(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const normalized = value.trim().replace(/[_.\s]+/g, "-").replace(/-+/g, "-").toUpperCase();
+  const normalized = value
+    .trim()
+    .replace(/[_.\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .toUpperCase()
+    .split("-")
+    .map(normalizeCodeSegment)
+    .join("-");
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeCodeSegment(segment: string): string {
+  return segment
+    .split("/")
+    .map((part) => (/^\d+$/.test(part) ? String(Number(part)) : part))
+    .join("/");
 }
 
 function inferDocumentationStage(value: string): "П" | "Р" | "И" | "ИИ" | undefined {
@@ -399,7 +397,6 @@ function normalizeDocumentationStage(value: string | undefined): "П" | "Р" | "
   if (value === "ИИ") return "ИИ";
   return undefined;
 }
-
 function isDocumentationStage(value: string | undefined): boolean {
   return normalizeDocumentationStage(value) !== undefined;
 }
@@ -409,7 +406,7 @@ function splitCodeSegments(value: string): string[] {
     .trim()
     .toUpperCase()
     .split(/[-.\s]+/u)
-    .map((segment) => segment.trim())
+    .map((segment) => normalizeCodeSegment(segment.trim()))
     .filter(Boolean);
 }
 
@@ -438,7 +435,11 @@ function inferSectionSegment(segmentsAfterStage: readonly string[]): string | un
 }
 
 function inferVolumeSegment(segmentsAfterStage: readonly string[]): string | undefined {
-  return segmentsAfterStage.find((segment) => /^\d{4}$/.test(segment));
+  const sectionIndex = segmentsAfterStage.findIndex((segment) => /^\d+(?:\/\d+)?$/.test(segment));
+  if (sectionIndex >= 0) {
+    return segmentsAfterStage.slice(sectionIndex + 1).find((segment) => /^\d+$/.test(segment));
+  }
+  return segmentsAfterStage.find((segment) => /^\d{1,4}$/.test(segment));
 }
 
 function inferDocumentGroupSegment(
@@ -545,11 +546,9 @@ function extractCodesFromPayload(
   baseSource: SourceReference
 ): ExtractedCodeCandidate[] {
   const directValues = [
-    ["textHint", payload["textHint"]],
     ["text", payload["text"]],
     ["value", payload["value"]],
-    ["rawValue", payload["rawValue"]],
-    ["originalName", payload["originalName"]]
+    ["rawValue", payload["rawValue"]]
   ] as const;
   const directCodes = directValues.flatMap(([field, value]) => {
     const code = extractCodeCandidate(readString(value) ?? "");

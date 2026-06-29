@@ -27,6 +27,7 @@ import {
   ProcessorExecutionError,
   type ProcessorRegistry
 } from "../processing/processor-runtime.js";
+import { withProcessingSpan } from "../processing/telemetry.js";
 import type { ObjectStorageClient } from "../infrastructure/object-storage/plugin.js";
 import type {
   CvOcrClient,
@@ -484,12 +485,24 @@ async function executeFileTechnicalPlaceholder(
       await failJob(input.processing, job, "object_storage_required", payload);
       return;
     }
+    const objectStorage = input.objectStorage;
 
-    const workbook = await loadXlsxWorkbookForProcessor({
-      objectStorage: input.objectStorage,
-      bucket: storedFile.storage.bucket,
-      key: storedFile.storage.key
-    }).catch(async (error: unknown) => {
+    const workbook = await withProcessingSpan(
+      {
+        job,
+        span: "xlsx.workbook.load",
+        attributes: {
+          bucket: storedFile.storage.bucket,
+          key: storedFile.storage.key
+        }
+      },
+      () =>
+        loadXlsxWorkbookForProcessor({
+          objectStorage,
+          bucket: storedFile.storage.bucket,
+          key: storedFile.storage.key
+        })
+    ).catch(async (error: unknown) => {
       if (isXlsxParseError(error)) {
         await persistFailedXlsxTechnicalOutcome(input, job, payload, error);
         return undefined;
@@ -1459,17 +1472,32 @@ async function persistPdfContentOutputs(input: {
     });
   }
 
-  const renderedPages = await loadRenderedPdfPagesFromArtifact({
-    objectStorage: input.objectStorage,
-    artifactPayload: renderedArtifact.payload
-  });
+  const renderedPages = await withProcessingSpan(
+    {
+      job: input.job,
+      span: "pdf.rendered_pages.load"
+    },
+    () =>
+      loadRenderedPdfPagesFromArtifact({
+        objectStorage: input.objectStorage,
+        artifactPayload: renderedArtifact.payload
+      })
+  );
   const textPages = readPdfTextPagesFromArtifact(textLayerArtifact?.payload);
 
   try {
-    const layout = await input.cvOcrClient.detectPdfLayout({
-      renderedPages,
-      textPages
-    });
+    const layout = await withProcessingSpan(
+      {
+        job: input.job,
+        span: "cv_ocr.detect_pdf_layout",
+        attributes: { pageCount: renderedPages.length, textPageCount: textPages.length }
+      },
+      () =>
+        input.cvOcrClient.detectPdfLayout({
+          renderedPages,
+          textPages
+        })
+    );
     await input.baselineFacts.upsertContentArtifact({
       organizationId: input.job.organizationId,
       documentVersionId: input.payload.documentVersionId,
@@ -1484,10 +1512,18 @@ async function persistPdfContentOutputs(input: {
       producedByJobId: input.job.id
     });
 
-    const ocrCandidates = await input.cvOcrClient.planPdfOcrCandidates({
-      regions: layout.regions,
-      renderedPages
-    });
+    const ocrCandidates = await withProcessingSpan(
+      {
+        job: input.job,
+        span: "cv_ocr.plan_pdf_ocr_candidates",
+        attributes: { regionCount: layout.regions.length, pageCount: renderedPages.length }
+      },
+      () =>
+        input.cvOcrClient.planPdfOcrCandidates({
+          regions: layout.regions,
+          renderedPages
+        })
+    );
     await input.baselineFacts.upsertContentArtifact({
       organizationId: input.job.organizationId,
       documentVersionId: input.payload.documentVersionId,
@@ -1502,11 +1538,23 @@ async function persistPdfContentOutputs(input: {
       producedByJobId: input.job.id
     });
 
-    const ocrText = await input.cvOcrClient.runPdfTargetedOcr({
-      renderedPages,
-      candidates: ocrCandidates.candidates,
-      textPages
-    });
+    const ocrText = await withProcessingSpan(
+      {
+        job: input.job,
+        span: "cv_ocr.run_pdf_targeted_ocr",
+        attributes: {
+          pageCount: renderedPages.length,
+          candidateCount: ocrCandidates.candidates.length,
+          textPageCount: textPages.length
+        }
+      },
+      () =>
+        input.cvOcrClient.runPdfTargetedOcr({
+          renderedPages,
+          candidates: ocrCandidates.candidates,
+          textPages
+        })
+    );
     await input.baselineFacts.upsertContentArtifact({
       organizationId: input.job.organizationId,
       documentVersionId: input.payload.documentVersionId,
@@ -1521,12 +1569,25 @@ async function persistPdfContentOutputs(input: {
       producedByJobId: input.job.id
     });
 
-    const tables = await input.cvOcrClient.reconstructPdfTables({
-      regions: layout.regions,
-      candidates: ocrCandidates.candidates,
-      ocrTexts: ocrText.texts,
-      renderedPages
-    });
+    const tables = await withProcessingSpan(
+      {
+        job: input.job,
+        span: "cv_ocr.reconstruct_pdf_tables",
+        attributes: {
+          regionCount: layout.regions.length,
+          candidateCount: ocrCandidates.candidates.length,
+          ocrTextCount: ocrText.texts.length,
+          pageCount: renderedPages.length
+        }
+      },
+      () =>
+        input.cvOcrClient.reconstructPdfTables({
+          regions: layout.regions,
+          candidates: ocrCandidates.candidates,
+          ocrTexts: ocrText.texts,
+          renderedPages
+        })
+    );
     await input.baselineFacts.upsertContentArtifact({
       organizationId: input.job.organizationId,
       documentVersionId: input.payload.documentVersionId,
@@ -1575,17 +1636,36 @@ async function persistPdfStampProbeOutputs(input: {
     });
   }
 
-  const renderedPages = await loadRenderedPdfPagesFromArtifact({
-    objectStorage: input.objectStorage,
-    artifactPayload: renderedArtifact.payload
-  });
+  const renderedPages = await withProcessingSpan(
+    {
+      job: input.job,
+      span: "pdf.rendered_pages.load"
+    },
+    () =>
+      loadRenderedPdfPagesFromArtifact({
+        objectStorage: input.objectStorage,
+        artifactPayload: renderedArtifact.payload
+      })
+  );
   const textPages = readPdfTextPagesFromArtifact(textLayerArtifact?.payload);
 
   try {
-    const layout = await input.cvOcrClient.detectPdfLayout({
-      renderedPages,
-      textPages
-    });
+    const layout = await withProcessingSpan(
+      {
+        job: input.job,
+        span: "cv_ocr.detect_pdf_layout",
+        attributes: {
+          extractionScope: "stamp_probe",
+          pageCount: renderedPages.length,
+          textPageCount: textPages.length
+        }
+      },
+      () =>
+        input.cvOcrClient.detectPdfLayout({
+          renderedPages,
+          textPages
+        })
+    );
     await input.baselineFacts.upsertContentArtifact({
       organizationId: input.job.organizationId,
       documentVersionId: input.payload.documentVersionId,
@@ -1601,10 +1681,22 @@ async function persistPdfStampProbeOutputs(input: {
       producedByJobId: input.job.id
     });
 
-    const planned = await input.cvOcrClient.planPdfOcrCandidates({
-      regions: layout.regions,
-      renderedPages
-    });
+    const planned = await withProcessingSpan(
+      {
+        job: input.job,
+        span: "cv_ocr.plan_pdf_ocr_candidates",
+        attributes: {
+          extractionScope: "stamp_probe",
+          regionCount: layout.regions.length,
+          pageCount: renderedPages.length
+        }
+      },
+      () =>
+        input.cvOcrClient.planPdfOcrCandidates({
+          regions: layout.regions,
+          renderedPages
+        })
+    );
     const stampCandidates = planned.candidates.filter((candidate) => candidate.targetKind === "stamp_field");
     const candidateArtifact = await input.baselineFacts.upsertContentArtifact({
       organizationId: input.job.organizationId,
@@ -1622,11 +1714,24 @@ async function persistPdfStampProbeOutputs(input: {
     });
 
     const ocrText = stampCandidates.length
-      ? await input.cvOcrClient.runPdfTargetedOcr({
-          renderedPages,
-          candidates: stampCandidates,
-          textPages
-        })
+      ? await withProcessingSpan(
+          {
+            job: input.job,
+            span: "cv_ocr.run_pdf_targeted_ocr",
+            attributes: {
+              extractionScope: "stamp_probe",
+              pageCount: renderedPages.length,
+              candidateCount: stampCandidates.length,
+              textPageCount: textPages.length
+            }
+          },
+          () =>
+            input.cvOcrClient.runPdfTargetedOcr({
+              renderedPages,
+              candidates: stampCandidates,
+              textPages
+            })
+        )
       : {
           adapter: planned.adapter,
           texts: [],
@@ -1684,11 +1789,22 @@ async function persistXlsxCellOutputs(input: {
     };
   };
 }): Promise<boolean> {
-  const workbook = await loadXlsxWorkbookForProcessor({
-    objectStorage: input.objectStorage,
-    bucket: input.storedFile.storage.bucket,
-    key: input.storedFile.storage.key
-  }).catch(async (error: unknown) => {
+  const workbook = await withProcessingSpan(
+    {
+      job: input.job,
+      span: "xlsx.workbook.load",
+      attributes: {
+        bucket: input.storedFile.storage.bucket,
+        key: input.storedFile.storage.key
+      }
+    },
+    () =>
+      loadXlsxWorkbookForProcessor({
+        objectStorage: input.objectStorage,
+        bucket: input.storedFile.storage.bucket,
+        key: input.storedFile.storage.key
+      })
+  ).catch(async (error: unknown) => {
     if (isXlsxParseError(error)) {
       await persistFailedXlsxContentOutcome(input, input.job, input.payload, error);
       return undefined;
@@ -1698,14 +1814,32 @@ async function persistXlsxCellOutputs(input: {
   if (!workbook) {
     return false;
   }
-  const cellStorage = await storeXlsxCellPayload({
-    organizationId: input.job.organizationId,
-    documentVersionId: input.payload.documentVersionId,
-    jobId: input.job.id,
-    objectStorage: input.objectStorage,
-    bucket: input.storedFile.storage.bucket,
-    cells: buildXlsxCellsPayload(workbook)
-  });
+  const cells = buildXlsxCellsPayload(workbook);
+  const sheetCount = new Set(
+    cells.cells
+      .map((cell) => cell["sheetName"])
+      .filter((sheetName): sheetName is string => typeof sheetName === "string")
+  ).size;
+  const cellStorage = await withProcessingSpan(
+    {
+      job: input.job,
+      span: "xlsx.cells.store",
+      attributes: {
+        bucket: input.storedFile.storage.bucket,
+        sheetCount,
+        cellCount: cells.cells.length
+      }
+    },
+    () =>
+      storeXlsxCellPayload({
+        organizationId: input.job.organizationId,
+        documentVersionId: input.payload.documentVersionId,
+        jobId: input.job.id,
+        objectStorage: input.objectStorage,
+        bucket: input.storedFile.storage.bucket,
+        cells
+      })
+  );
   await input.baselineFacts.upsertContentArtifact({
     organizationId: input.job.organizationId,
     documentVersionId: input.payload.documentVersionId,
@@ -1844,12 +1978,24 @@ async function persistPdfTechnicalOutputs(input: {
     });
   }
 
-  const content = await readObjectBytes({
-    objectStorage: input.objectStorage,
-    bucket: sourceBucket,
-    key: input.storedFile.storage.key,
-    code: "pdf_source_read_failed"
-  });
+  const content = await withProcessingSpan(
+    {
+      job: input.job,
+      span: "source.read",
+      attributes: {
+        bucket: sourceBucket,
+        key: input.storedFile.storage.key,
+        sizeBytes: input.storedFile.sizeBytes
+      }
+    },
+    () =>
+      readObjectBytes({
+        objectStorage: input.objectStorage,
+        bucket: sourceBucket,
+        key: input.storedFile.storage.key,
+        code: "pdf_source_read_failed"
+      })
+  );
   const pdfInput: PdfTechnicalInput = {
     file: buildTechnicalStoredFileRef(input.storedFile, input.payload.documentVersionId),
     content,
@@ -1860,16 +2006,42 @@ async function persistPdfTechnicalOutputs(input: {
 
   try {
     const [metadata, textLayer, renderedPages] = await Promise.all([
-      input.cvOcrClient.extractPdfMetadata(pdfInput),
-      input.cvOcrClient.extractPdfTextLayer(pdfInput),
-      input.cvOcrClient.renderPdfPages({
-        ...pdfInput,
-        profile: {
-          dpi: pdfRenderDpi,
-          imageFormat: "png",
-          maxPagePixels: pdfRenderMaxPagePixels
-        }
-      })
+      withProcessingSpan(
+        {
+          job: input.job,
+          span: "cv_ocr.extract_pdf_metadata",
+          attributes: { sizeBytes: input.storedFile.sizeBytes }
+        },
+        () => input.cvOcrClient.extractPdfMetadata(pdfInput)
+      ),
+      withProcessingSpan(
+        {
+          job: input.job,
+          span: "cv_ocr.extract_pdf_text_layer",
+          attributes: { sizeBytes: input.storedFile.sizeBytes }
+        },
+        () => input.cvOcrClient.extractPdfTextLayer(pdfInput)
+      ),
+      withProcessingSpan(
+        {
+          job: input.job,
+          span: "cv_ocr.render_pdf_pages",
+          attributes: {
+            sizeBytes: input.storedFile.sizeBytes,
+            dpi: pdfRenderDpi,
+            maxPagePixels: pdfRenderMaxPagePixels
+          }
+        },
+        () =>
+          input.cvOcrClient.renderPdfPages({
+            ...pdfInput,
+            profile: {
+              dpi: pdfRenderDpi,
+              imageFormat: "png",
+              maxPagePixels: pdfRenderMaxPagePixels
+            }
+          })
+      )
     ]);
 
     await input.baselineFacts.upsertContentArtifact({
@@ -1906,14 +2078,29 @@ async function persistPdfTechnicalOutputs(input: {
         format: "pdf",
         schema: { id: "pdf_rendered_pages", version: "1.0.0" },
         adapter: renderedPages.adapter,
-        pages: await storePdfRenderedPages({
-          organizationId: input.job.organizationId,
-          documentVersionId: input.payload.documentVersionId,
-          jobId: input.job.id,
-          objectStorage: input.objectStorage,
-          bucket: sourceBucket,
-          pages: renderedPages.pages
-        }),
+        pages: await withProcessingSpan(
+          {
+            job: input.job,
+            span: "pdf.rendered_pages.store",
+            attributes: {
+              bucket: sourceBucket,
+              pageCount: renderedPages.pages.length,
+              byteLength: renderedPages.pages.reduce(
+                (total, page) => total + page.content.byteLength,
+                0
+              )
+            }
+          },
+          () =>
+            storePdfRenderedPages({
+              organizationId: input.job.organizationId,
+              documentVersionId: input.payload.documentVersionId,
+              jobId: input.job.id,
+              objectStorage: input.objectStorage,
+              bucket: sourceBucket,
+              pages: renderedPages.pages
+            })
+        ),
         diagnostics: renderedPages.diagnostics
       },
       producedByJobId: input.job.id

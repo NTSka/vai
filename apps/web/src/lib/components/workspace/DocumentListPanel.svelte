@@ -148,7 +148,7 @@
   function documentTypeLabel(value: string): string {
     const labels: Record<string, string> = {
       local_estimate: "ЛС",
-      local_estimate_calculation: "ЛС",
+      local_estimate_calculation: "ЛСР",
       resource_statement: "РС",
       object_estimate: "ОС",
       summary_estimate_calculation: "ССР",

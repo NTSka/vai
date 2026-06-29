@@ -63,10 +63,13 @@ describe("processor runtime", () => {
         message: "processing job started",
         fields: expect.objectContaining({
           jobId: "job-1",
+          event: "processing.job",
+          status: "started",
           processorId: "fixture_processor",
           organizationId: "organization-1",
           correlationId: "correlation-1",
           causationId: "causation-1",
+          documentVersionId: "version-1",
           attempt: 0
         })
       },
@@ -75,6 +78,9 @@ describe("processor runtime", () => {
         message: "processing job completed",
         fields: expect.objectContaining({
           jobId: "job-1",
+          event: "processing.job",
+          status: "completed",
+          documentVersionId: "version-1",
           durationMs: expect.any(Number)
         })
       }
@@ -157,7 +163,11 @@ function createRuntimeFixture(
     processorId: "fixture_processor",
     processorVersion: "1.0.0",
     jobType: "fixture_job",
-    payload: {},
+    payload: {
+      documentSetId: "document-set-1",
+      documentId: "document-1",
+      documentVersionId: "version-1"
+    },
     status: "running" as const,
     scheduledAt: new Date(),
     startedAt: new Date(),

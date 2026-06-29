@@ -19,6 +19,7 @@ import {
   createDefaultProcessorRegistry,
   createProcessorRuntime
 } from "../processing/processor-runtime.js";
+import { createJsonProcessingLogger } from "../processing/telemetry.js";
 import { createEventBus } from "../processing/event-bus.js";
 import { createOrchestratorRegistry } from "../processing/orchestrator-registry.js";
 import { registerBaselineOrchestrators } from "../baseline-processing/pipeline.js";
@@ -178,10 +179,7 @@ function createRuntime(
   const processorRuntime = createProcessorRuntime({
     processing,
     registry,
-    logger: {
-      info: (fields, message) => console.info(message, fields),
-      error: (fields, message) => console.error(message, fields)
-    }
+    logger: createJsonProcessingLogger()
   });
 
   return {

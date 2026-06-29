@@ -86,6 +86,25 @@ describe("archive unpacking processor", () => {
     ]);
   });
 
+  it("preserves Cyrillic names for extracted estimate workbooks", async () => {
+    const archive = await createZipFixture({
+      "ОС ЛС/03_968990025_04-13-121-03 - ЛСР1.xlsx": "xlsx-content"
+    });
+    const fixture = createArchiveFixture({ archive });
+
+    await fixture.processor.execute({
+      organizationId: "organization-1",
+      jobId: "job-1"
+    });
+
+    expect(fixture.persistedFiles).toEqual([
+      expect.objectContaining({
+        originalName: "03_968990025_04-13-121-03 - ЛСР1.xlsx",
+        pathInSource: "ОС ЛС/03_968990025_04-13-121-03 - ЛСР1.xlsx"
+      })
+    ]);
+  });
+
   it("ignores unsupported archive entries while preserving supported files", async () => {
     const archive = await createZipFixture({
       "docs/drawing.pdf": "pdf-content",
