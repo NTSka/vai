@@ -20,14 +20,14 @@ export function backendProxy(prefix: string): RequestHandler {
     }
 
     const method = request.method.toUpperCase();
-    const body =
-      method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
+    const body = method === "GET" || method === "HEAD" ? undefined : request.body;
     const response = await fetch(target, {
       method,
       headers,
       body,
+      ...(body ? { duplex: "half" } : {}),
       redirect: "manual"
-    });
+    } as RequestInit & { duplex?: "half" });
 
     const responseHeaders = new Headers();
     response.headers.forEach((value, key) => {

@@ -63,6 +63,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       ORIGIN: ${WEB_ORIGIN}
+      BODY_SIZE_LIMIT: ${WEB_BODY_SIZE_LIMIT:-Infinity}
       PUBLIC_BACKEND_ORIGIN: http://backend:3000
     ports:
       - "80:3000"
