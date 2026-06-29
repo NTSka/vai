@@ -432,6 +432,22 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code: string;
+                                message: string;
+                                requestId: string;
+                                details?: unknown;
+                            };
+                        };
+                    };
+                };
             };
         };
         delete?: never;

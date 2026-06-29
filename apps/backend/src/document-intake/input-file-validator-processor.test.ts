@@ -458,6 +458,9 @@ function createProcessorFixture(
       }
       return storedFiles;
     },
+    async findOriginalUploadFilesByChecksum() {
+      return [];
+    },
     async updateDocumentSetStatus(input) {
       documentSetStatus = input.status;
       documentSetStatuses.push(input.status);

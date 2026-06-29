@@ -7,7 +7,10 @@ import type { AuthService, AuthSession } from "./auth/types.js";
 import { createTestConfig } from "./test-support/config.js";
 import type { DatabaseClient } from "./infrastructure/database/plugin.js";
 import type { ObjectStorageClient } from "./infrastructure/object-storage/plugin.js";
-import type { UploadDocumentSetService } from "./document-intake/upload-service.js";
+import {
+  DuplicateUploadFileError,
+  type UploadDocumentSetService
+} from "./document-intake/upload-service.js";
 
 const healthyDatabase: DatabaseClient = {
   query: async () => ({ rows: [], command: "SELECT", rowCount: 0, oid: 0, fields: [] })
@@ -717,6 +720,67 @@ describe("backend app", () => {
         checksum: "3c41d3835155c97d51a836c887be9c0063b7b45f61e14017a9d653fa4c655802"
       })
     ]);
+
+    await app.close();
+  });
+
+  it("returns conflict when an uploaded file already exists", async () => {
+    const jwtIssuer = createTestJwtIssuer();
+    const tokens = jwtIssuer.issuePair(testSession.user.id);
+    const uploadService: UploadDocumentSetService = {
+      async upload() {
+        throw new DuplicateUploadFileError([
+          {
+            id: "stored-file-1",
+            originalName: "source.pdf",
+            checksum:
+              "3c41d3835155c97d51a836c887be9c0063b7b45f61e14017a9d653fa4c655802"
+          }
+        ]);
+      }
+    };
+    const app = await buildApp({
+      config: createTestConfig(),
+      logger: false,
+      database: healthyDatabase,
+      objectStorage: healthyObjectStorage,
+      auth: {
+        authService,
+        jwtIssuer
+      },
+      documentIntake: {
+        uploadService
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/document-sets/uploads",
+      headers: {
+        cookie: `vai_access_token=${tokens.accessToken}`,
+        "x-organization-id": testSession.organizations[0]?.id,
+        ...multipartHeaders("boundary")
+      },
+      payload: multipartBody({
+        boundary: "boundary",
+        files: [
+          {
+            fieldName: "files",
+            filename: "source.pdf",
+            contentType: "application/pdf",
+            content: "pdf-content"
+          }
+        ]
+      })
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "duplicate_file_upload",
+        message: "One or more files have already been uploaded"
+      }
+    });
 
     await app.close();
   });

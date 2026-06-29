@@ -236,6 +236,52 @@ describe("Phase 3 repositories", () => {
     expect(provenance.childFileId).toBe(extracted.id);
   });
 
+  dbIt("finds existing original uploads by checksum", async () => {
+    const database = getDatabase();
+    if (!database) return;
+
+    const context = await createOrganizationContext(database);
+    const intake = createDocumentIntakeRepository(database);
+
+    const original = await intake.createStoredFile({
+      organizationId: context.organization.id,
+      originalName: "source.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf",
+      sizeBytes: 128,
+      checksum: "duplicate-checksum",
+      checksumAlgorithm: "sha256",
+      storage: {
+        provider: "s3_compatible",
+        bucket: "vai-local-files",
+        key: "original/source.pdf"
+      },
+      purpose: "original_upload"
+    });
+    await intake.createStoredFile({
+      organizationId: context.organization.id,
+      originalName: "generated.pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf",
+      sizeBytes: 128,
+      checksum: "generated-checksum",
+      checksumAlgorithm: "sha256",
+      storage: {
+        provider: "s3_compatible",
+        bucket: "vai-local-files",
+        key: "generated/generated.pdf"
+      },
+      purpose: "generated_artifact"
+    });
+
+    const existing = await intake.findOriginalUploadFilesByChecksum({
+      organizationId: context.organization.id,
+      checksums: ["duplicate-checksum", "generated-checksum"]
+    });
+
+    expect(existing.map((file) => file.id)).toEqual([original.id]);
+  });
+
   dbIt("creates documents and versions and persists unsupported version status", async () => {
     const database = getDatabase();
     if (!database) return;

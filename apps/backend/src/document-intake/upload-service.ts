@@ -46,19 +46,55 @@ export type PersistUpload = (
   input: PersistUploadInput
 ) => Promise<UploadDocumentSetResult>;
 
+export type ExistingUploadFile = {
+  readonly id: string;
+  readonly originalName: string;
+  readonly checksum: string;
+};
+
+export type FindExistingUploadFilesByChecksum = (input: {
+  readonly organizationId: string;
+  readonly checksums: readonly string[];
+}) => Promise<readonly ExistingUploadFile[]>;
+
 export type UploadDocumentSetService = {
   upload(input: UploadDocumentSetInput): Promise<UploadDocumentSetResult>;
 };
+
+export class DuplicateUploadFileError extends Error {
+  readonly code = "duplicate_file_upload";
+  readonly duplicates: readonly ExistingUploadFile[];
+
+  constructor(duplicates: readonly ExistingUploadFile[]) {
+    super("One or more files have already been uploaded");
+    this.name = "DuplicateUploadFileError";
+    this.duplicates = duplicates;
+  }
+}
 
 export function createUploadDocumentSetService(input: {
   readonly bucket: string;
   readonly objectStorage: ObjectStorageClient;
   readonly persistUpload: PersistUpload;
+  readonly findExistingUploadFilesByChecksum?: FindExistingUploadFilesByChecksum;
 }): UploadDocumentSetService {
   return {
     async upload(uploadInput) {
       const uploadedObjects: string[] = [];
       const persistedFiles: PersistUploadedFileInput[] = [];
+      const duplicateInputFiles = findDuplicateInputFiles(uploadInput.files);
+      if (duplicateInputFiles.length > 0) {
+        throw new DuplicateUploadFileError(duplicateInputFiles);
+      }
+
+      const existingFiles =
+        await input.findExistingUploadFilesByChecksum?.({
+          organizationId: uploadInput.organizationId,
+          checksums: uploadInput.files.map((file) => file.checksum)
+        }) ?? [];
+      if (existingFiles.length > 0) {
+        throw new DuplicateUploadFileError(existingFiles);
+      }
 
       try {
         for (const file of uploadInput.files) {
@@ -105,6 +141,29 @@ export function createUploadDocumentSetService(input: {
       }
     }
   };
+}
+
+function findDuplicateInputFiles(
+  files: readonly UploadableFile[]
+): ExistingUploadFile[] {
+  const firstByChecksum = new Map<string, UploadableFile>();
+  const duplicates: ExistingUploadFile[] = [];
+
+  for (const file of files) {
+    const first = firstByChecksum.get(file.checksum);
+    if (!first) {
+      firstByChecksum.set(file.checksum, file);
+      continue;
+    }
+
+    duplicates.push({
+      id: "request",
+      originalName: file.filename,
+      checksum: file.checksum
+    });
+  }
+
+  return duplicates;
 }
 
 async function cleanupUploadedObjects(input: {

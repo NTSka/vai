@@ -13,6 +13,10 @@ export type DocumentIntakeRepository = {
     readonly organizationId: string;
     readonly ids: readonly string[];
   }): Promise<ReadonlyArray<typeof schema.storedFiles.$inferSelect>>;
+  findOriginalUploadFilesByChecksum(input: {
+    readonly organizationId: string;
+    readonly checksums: readonly string[];
+  }): Promise<ReadonlyArray<typeof schema.storedFiles.$inferSelect>>;
   updateDocumentSetStatus(input: {
     readonly organizationId: string;
     readonly id: string;
@@ -60,6 +64,23 @@ export function createDocumentIntakeRepository(
           and(
             eq(schema.storedFiles.organizationId, input.organizationId),
             inArray(schema.storedFiles.id, [...input.ids])
+          )
+        );
+    },
+
+    async findOriginalUploadFilesByChecksum(input) {
+      if (input.checksums.length === 0) {
+        return [];
+      }
+
+      return db
+        .select()
+        .from(schema.storedFiles)
+        .where(
+          and(
+            eq(schema.storedFiles.organizationId, input.organizationId),
+            eq(schema.storedFiles.purpose, "original_upload"),
+            inArray(schema.storedFiles.checksum, [...input.checksums])
           )
         );
     },

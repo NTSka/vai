@@ -371,6 +371,9 @@ function createArchiveFixture(input: {
         }
       ];
     },
+    async findOriginalUploadFilesByChecksum() {
+      return [];
+    },
     async updateDocumentSetStatus(update) {
       documentSetStatuses.push(update.status);
       return {

@@ -4,7 +4,10 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { createUploadDocumentSetService } from "./upload-service.js";
+import {
+  createUploadDocumentSetService,
+  DuplicateUploadFileError
+} from "./upload-service.js";
 import type { ObjectStorageClient } from "../infrastructure/object-storage/plugin.js";
 
 const tempFiles: string[] = [];
@@ -115,6 +118,82 @@ describe("upload document set service", () => {
         key: putObjects[0]?.key
       }
     ]);
+  });
+
+  it("rejects duplicate files in one upload request before storing objects", async () => {
+    const putObjects: Parameters<ObjectStorageClient["putObject"]>[0][] = [];
+    const objectStorage = createObjectStorageDouble({ putObjects });
+    const service = createUploadDocumentSetService({
+      bucket: "vai-local-files",
+      objectStorage,
+      async persistUpload() {
+        throw new Error("persist should not be called");
+      }
+    });
+
+    await expect(
+      service.upload({
+        organizationId: "organization-1",
+        uploadedBy: "user-1",
+        files: [
+          {
+            filename: "source-a.pdf",
+            mimeType: "application/pdf",
+            ...(await createTempUploadFile("pdf-content"))
+          },
+          {
+            filename: "source-b.pdf",
+            mimeType: "application/pdf",
+            ...(await createTempUploadFile("pdf-content"))
+          }
+        ]
+      })
+    ).rejects.toBeInstanceOf(DuplicateUploadFileError);
+
+    expect(putObjects).toEqual([]);
+  });
+
+  it("rejects already uploaded files by checksum before storing objects", async () => {
+    const putObjects: Parameters<ObjectStorageClient["putObject"]>[0][] = [];
+    const objectStorage = createObjectStorageDouble({ putObjects });
+    const service = createUploadDocumentSetService({
+      bucket: "vai-local-files",
+      objectStorage,
+      async findExistingUploadFilesByChecksum(input) {
+        expect(input).toEqual({
+          organizationId: "organization-1",
+          checksums: [
+            "3c41d3835155c97d51a836c887be9c0063b7b45f61e14017a9d653fa4c655802"
+          ]
+        });
+        return [
+          {
+            id: "stored-file-1",
+            originalName: "existing.pdf",
+            checksum: input.checksums[0]!
+          }
+        ];
+      },
+      async persistUpload() {
+        throw new Error("persist should not be called");
+      }
+    });
+
+    await expect(
+      service.upload({
+        organizationId: "organization-1",
+        uploadedBy: "user-1",
+        files: [
+          {
+            filename: "source.pdf",
+            mimeType: "application/pdf",
+            ...(await createTempUploadFile("pdf-content"))
+          }
+        ]
+      })
+    ).rejects.toBeInstanceOf(DuplicateUploadFileError);
+
+    expect(putObjects).toEqual([]);
   });
 });
 

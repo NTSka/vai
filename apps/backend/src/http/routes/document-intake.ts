@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import {
   createUploadDocumentSetService,
+  DuplicateUploadFileError,
   type UploadDocumentSetService,
   type UploadableFile,
   type PersistUpload
@@ -29,6 +30,15 @@ const uploadResponseSchema = z.object({
   storedFileIds: z.array(z.string()),
   validationJobId: z.string(),
   status: z.literal("uploaded")
+});
+
+const errorResponseSchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    requestId: z.string(),
+    details: z.unknown().optional()
+  })
 });
 
 export type RegisterDocumentIntakeRoutesOptions = {
@@ -54,7 +64,8 @@ export async function registerDocumentIntakeRoutes(
         tags: ["document-intake"],
         consumes: ["multipart/form-data"],
         response: {
-          201: uploadResponseSchema
+          201: uploadResponseSchema,
+          409: errorResponseSchema
         }
       },
       bodyLimit: maxUploadRequestSizeBytes,
@@ -80,6 +91,15 @@ export async function registerDocumentIntakeRoutes(
         });
 
         return reply.status(201).send(result);
+      } catch (error) {
+        if (error instanceof DuplicateUploadFileError) {
+          throw new HttpError(
+            409,
+            "duplicate_file_upload",
+            "One or more files have already been uploaded"
+          );
+        }
+        throw error;
       } finally {
         await cleanupTempFiles(files);
       }
@@ -96,6 +116,8 @@ function createDefaultUploadService(app: FastifyInstance): UploadDocumentSetServ
   return createUploadDocumentSetService({
     bucket: app.config.objectStorage.bucket,
     objectStorage: app.objectStorage,
+    findExistingUploadFilesByChecksum: async (input) =>
+      createDocumentIntakeRepository(db).findOriginalUploadFilesByChecksum(input),
     persistUpload: createDbPersistUpload(app)
   });
 }
@@ -110,6 +132,15 @@ function createDbPersistUpload(app: FastifyInstance): PersistUpload {
     db.transaction(async (tx) => {
       const documentIntake = createDocumentIntakeRepository(tx);
       const processing = createProcessingRepository(tx);
+      const existingFiles =
+        await documentIntake.findOriginalUploadFilesByChecksum({
+          organizationId: input.organizationId,
+          checksums: input.files.map((file) => file.checksum)
+        });
+      if (existingFiles.length > 0) {
+        throw new DuplicateUploadFileError(existingFiles);
+      }
+
       const storedFileIds: string[] = [];
 
       for (const file of input.files) {

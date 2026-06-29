@@ -96,7 +96,11 @@
       const result = await api.upload(fetch, { organizationId: organization.id, files });
       latestDocumentSetId = result.documentSetId;
       await refreshWorkspace();
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "duplicate_file_upload") {
+        uploadError = "Такой файл уже был загружен.";
+        return;
+      }
       uploadError = "Не удалось загрузить файлы. Проверьте формат и доступность сервера.";
     } finally {
       uploadBusy = false;
