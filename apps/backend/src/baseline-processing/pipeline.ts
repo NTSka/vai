@@ -1495,7 +1495,8 @@ function buildProjectStructureNameHints(input: {
   const rawSiteTitle = readTypedFieldValue(projectContext["siteName"]);
   const siteTitle = rawSiteTitle ? normalizeSiteTitleHint(rawSiteTitle) : undefined;
   const siteKey = siteTitle ? stableStructureNameKey(siteTitle) : undefined;
-  const stageTitle = readTypedFieldValue(projectContext["stageName"]);
+  const rawStageTitle = readTypedFieldValue(projectContext["stageName"]);
+  const stageTitle = rawStageTitle ? normalizeStageTitleHint(rawStageTitle) : undefined;
   const stageKey = stageTitle ? stableStructureNameKey(stageTitle) : siteCode;
   const workTitle = readTypedFieldValue(projectContext["facilityName"]);
   const subobjectCode = readString(input.identity.parsedParts["subobjectCode"]);
@@ -1522,6 +1523,17 @@ function normalizeSiteTitleHint(title: string): string {
   const normalized = title.trim().replace(/\s+/g, " ");
   const quotedSiteMatch = /^([^\s]+\s*[-]?\s*\d+\s+"[^"]+")\s*.+$/iu.exec(normalized);
   return quotedSiteMatch?.[1]?.trim() ?? normalized;
+}
+
+function normalizeStageTitleHint(title: string): string {
+  const normalized = title.trim().replace(/\s+/g, " ");
+  const stageNumberMatch = /(?:^|[^\p{L}\p{N}])этап\s*(\d+(?:[.,/]\d+)*)(?=$|[^\d])/iu.exec(normalized);
+  if (!stageNumberMatch?.[1]) {
+    return normalized;
+  }
+
+  const stageNumber = stageNumberMatch[1].replace(/[,/]/g, ".");
+  return `Этап ${stageNumber}`;
 }
 
 function readTypedFieldValue(value: unknown): string | undefined {

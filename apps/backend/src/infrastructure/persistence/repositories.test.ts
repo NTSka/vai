@@ -1648,6 +1648,24 @@ describe("Phase 7 baseline processing skeleton", () => {
     await publishDocumentIdentityResolved(fixture, thirdContext, thirdIdentity.id);
     await runBaselinePipelineToIdle(fixture);
 
+    const fourthContext = await createRegisteredDocumentContextForOrganization(database, {
+      organizationId: context.organization.id,
+      uploadedBy: context.user.id,
+      originalName: "estimate-d.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const fourthIdentity = await createEstimatePlacementIdentity(database, {
+      context: fourthContext,
+      normalizedValue: "PRJ-004-002-7-KM",
+      siteCode: "004",
+      stageName: "Этап 12.1КС-9 \"Дальнереченская\" Здание склада химреагентов",
+      siteName: "КС-9 \"Дальнереченская\""
+    });
+
+    await publishDocumentIdentityResolved(fixture, fourthContext, fourthIdentity.id);
+    await runBaselinePipelineToIdle(fixture);
+
     const nodes = await database
       .select()
       .from(schema.projectStructureNodes)
@@ -1702,6 +1720,10 @@ describe("Phase 7 baseline processing skeleton", () => {
         }),
         expect.objectContaining({
           documentVersionId: thirdContext.version.id,
+          status: "placed"
+        }),
+        expect.objectContaining({
+          documentVersionId: fourthContext.version.id,
           status: "placed"
         })
       ])
