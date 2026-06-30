@@ -21,6 +21,16 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: booleanFromString,
   JWT_ACCESS_SECRET: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().min(1),
+  JWT_ACCESS_MAX_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(12 * 60 * 60),
+  JWT_REFRESH_MAX_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * 24 * 60 * 60),
   AUTH_COOKIE_SECURE: z.enum(["true", "false"]).optional(),
   CV_OCR_SERVICE_URL: z.string().min(1),
   CV_OCR_DEADLINE_MS: z.coerce.number().int().positive().default(300_000),
@@ -49,6 +59,8 @@ export type BackendConfig = {
   readonly jwt: {
     readonly accessSecret: string;
     readonly refreshSecret: string;
+    readonly accessMaxAgeSeconds: number;
+    readonly refreshMaxAgeSeconds: number;
   };
   readonly authCookieSecure: boolean;
   readonly cvOcrServiceUrl: string;
@@ -88,7 +100,9 @@ export function loadBackendConfig(
     },
     jwt: {
       accessSecret: value.JWT_ACCESS_SECRET,
-      refreshSecret: value.JWT_REFRESH_SECRET
+      refreshSecret: value.JWT_REFRESH_SECRET,
+      accessMaxAgeSeconds: value.JWT_ACCESS_MAX_AGE_SECONDS,
+      refreshMaxAgeSeconds: value.JWT_REFRESH_MAX_AGE_SECONDS
     },
     authCookieSecure:
       value.AUTH_COOKIE_SECURE === undefined

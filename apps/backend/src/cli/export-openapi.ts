@@ -33,7 +33,9 @@ const exportConfig: BackendConfig = {
   },
   jwt: {
     accessSecret: "openapi-export-access-secret",
-    refreshSecret: "openapi-export-refresh-secret"
+    refreshSecret: "openapi-export-refresh-secret",
+    accessMaxAgeSeconds: 12 * 60 * 60,
+    refreshMaxAgeSeconds: 30 * 24 * 60 * 60
   },
   authCookieSecure: false,
   cvOcrServiceUrl: "localhost:50051",

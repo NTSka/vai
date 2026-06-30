@@ -28,7 +28,9 @@ export function registerAuthPlugin(
     options.jwtIssuer ??
     createJwtIssuer({
       accessSecret: app.config.jwt.accessSecret,
-      refreshSecret: app.config.jwt.refreshSecret
+      refreshSecret: app.config.jwt.refreshSecret,
+      accessMaxAgeSeconds: app.config.jwt.accessMaxAgeSeconds,
+      refreshMaxAgeSeconds: app.config.jwt.refreshMaxAgeSeconds
     });
   const authService = options.authService ?? createDefaultAuthService(app);
 

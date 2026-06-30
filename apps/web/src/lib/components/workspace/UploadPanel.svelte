@@ -77,7 +77,7 @@
   {#if progress}
     <div class="mt-3 border border-line bg-panel p-3" aria-live="polite">
       <div class="mb-2 flex items-center justify-between gap-3 text-xs">
-        <span class="font-semibold text-ink">Передача файлов</span>
+        <span class="font-semibold text-ink">Отправка из браузера</span>
         <span class="shrink-0 text-slate-600">
           {progressLabel(progress)}
         </span>

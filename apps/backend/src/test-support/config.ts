@@ -18,7 +18,9 @@ export function createTestConfig(
     },
     jwt: {
       accessSecret: "test-access-secret",
-      refreshSecret: "test-refresh-secret"
+      refreshSecret: "test-refresh-secret",
+      accessMaxAgeSeconds: 12 * 60 * 60,
+      refreshMaxAgeSeconds: 30 * 24 * 60 * 60
     },
     authCookieSecure: false,
     cvOcrServiceUrl: "localhost:50051",

@@ -44,6 +44,17 @@ describe("backend config", () => {
     expect(config.cvOcrGrpcMaxMessageBytes).toBe(1_073_741_824);
   });
 
+  it("parses auth token max age overrides", () => {
+    const config = loadBackendConfig({
+      ...requiredEnv,
+      JWT_ACCESS_MAX_AGE_SECONDS: "7200",
+      JWT_REFRESH_MAX_AGE_SECONDS: "86400"
+    });
+
+    expect(config.jwt.accessMaxAgeSeconds).toBe(7200);
+    expect(config.jwt.refreshMaxAgeSeconds).toBe(86400);
+  });
+
   it("defaults secure auth cookies to production only", () => {
     expect(loadBackendConfig(requiredEnv).authCookieSecure).toBe(false);
     expect(
