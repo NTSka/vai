@@ -55,6 +55,18 @@ describe("backend config", () => {
     expect(config.jwt.refreshMaxAgeSeconds).toBe(86400);
   });
 
+  it("parses allowed CORS origins", () => {
+    const config = loadBackendConfig({
+      ...requiredEnv,
+      CORS_ALLOWED_ORIGINS: "http://51.250.91.68, http://localhost:5173"
+    });
+
+    expect(config.corsAllowedOrigins).toEqual([
+      "http://51.250.91.68",
+      "http://localhost:5173"
+    ]);
+  });
+
   it("defaults secure auth cookies to production only", () => {
     expect(loadBackendConfig(requiredEnv).authCookieSecure).toBe(false);
     expect(

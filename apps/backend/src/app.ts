@@ -11,6 +11,7 @@ import {
   jsonSchemaTransform
 } from "fastify-type-provider-zod";
 import swagger from "@fastify/swagger";
+import cors from "@fastify/cors";
 
 import { loadBackendConfig, type BackendConfig } from "./config.js";
 import { registerAuthPlugin, type AuthPluginOptions } from "./auth/plugin.js";
@@ -68,6 +69,13 @@ export async function buildApp(
   });
 
   registerErrorHandler(app);
+
+  if (config.corsAllowedOrigins.length > 0) {
+    await app.register(cors, {
+      credentials: true,
+      origin: [...config.corsAllowedOrigins]
+    });
+  }
 
   await app.register(swagger, {
     openapi: {

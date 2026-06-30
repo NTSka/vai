@@ -66,8 +66,10 @@ Set these values for the COI compose runtime:
 - `AUTH_COOKIE_SECURE=false` when serving the MVP over plain HTTP.
   Use `true` once the public entrypoint is HTTPS.
 - `WEB_ORIGIN`, for example `http://<public-ip>` or the HTTPS domain.
-- `WEB_BODY_SIZE_LIMIT=Infinity` for direct large-file uploads through
-  SvelteKit's Node adapter. Keep backend upload limits as the authoritative
-  application limit.
+- `CORS_ALLOWED_ORIGINS=${WEB_ORIGIN}` for direct browser uploads to the
+  backend port.
+- `WEB_BODY_SIZE_LIMIT=Infinity` for proxied non-upload requests that may carry
+  request bodies. Large file uploads should go directly to the backend port.
+  Keep backend upload limits as the authoritative application limit.
 
 The backend and worker use `cv-ocr-service:50051` inside the compose network.

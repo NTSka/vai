@@ -38,6 +38,7 @@ const exportConfig: BackendConfig = {
     refreshMaxAgeSeconds: 30 * 24 * 60 * 60
   },
   authCookieSecure: false,
+  corsAllowedOrigins: [],
   cvOcrServiceUrl: "localhost:50051",
   cvOcrDeadlineMs: 300_000,
   cvOcrGrpcMaxMessageBytes: 512 * 1024 * 1024,

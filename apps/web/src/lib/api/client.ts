@@ -123,7 +123,7 @@ function uploadWithProgress(input: UploadInput): Promise<UploadResponse> {
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/document-sets/uploads");
+    xhr.open("POST", `${uploadOrigin()}/document-sets/uploads`);
     xhr.withCredentials = true;
     xhr.timeout = 30 * 60 * 1000;
     xhr.setRequestHeader("x-organization-id", input.organizationId);
@@ -206,6 +206,19 @@ function uploadWithProgress(input: UploadInput): Promise<UploadResponse> {
 
     xhr.send(form);
   });
+}
+
+function uploadOrigin(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const configuredOrigin = window.localStorage.getItem("vai_upload_origin");
+  if (configuredOrigin) {
+    return configuredOrigin;
+  }
+
+  return `${window.location.protocol}//${window.location.hostname}:3000`;
 }
 
 function toXhrApiError(xhr: XMLHttpRequest): ApiError {

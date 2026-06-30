@@ -32,6 +32,17 @@ const envSchema = z.object({
     .positive()
     .default(30 * 24 * 60 * 60),
   AUTH_COOKIE_SECURE: z.enum(["true", "false"]).optional(),
+  CORS_ALLOWED_ORIGINS: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value
+        ? value
+            .split(",")
+            .map((origin) => origin.trim())
+            .filter(Boolean)
+        : []
+    ),
   CV_OCR_SERVICE_URL: z.string().min(1),
   CV_OCR_DEADLINE_MS: z.coerce.number().int().positive().default(300_000),
   CV_OCR_GRPC_MAX_MESSAGE_BYTES: z.coerce
@@ -63,6 +74,7 @@ export type BackendConfig = {
     readonly refreshMaxAgeSeconds: number;
   };
   readonly authCookieSecure: boolean;
+  readonly corsAllowedOrigins: readonly string[];
   readonly cvOcrServiceUrl: string;
   readonly cvOcrDeadlineMs: number;
   readonly cvOcrGrpcMaxMessageBytes: number;
@@ -108,6 +120,7 @@ export function loadBackendConfig(
       value.AUTH_COOKIE_SECURE === undefined
         ? value.NODE_ENV === "production"
         : value.AUTH_COOKIE_SECURE === "true",
+    corsAllowedOrigins: value.CORS_ALLOWED_ORIGINS,
     cvOcrServiceUrl: value.CV_OCR_SERVICE_URL,
     cvOcrDeadlineMs: value.CV_OCR_DEADLINE_MS,
     cvOcrGrpcMaxMessageBytes: value.CV_OCR_GRPC_MAX_MESSAGE_BYTES,
