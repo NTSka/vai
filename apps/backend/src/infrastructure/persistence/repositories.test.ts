@@ -1591,7 +1591,7 @@ describe("Phase 7 baseline processing skeleton", () => {
     });
   });
 
-  dbIt("groups estimate structure by physical site and code stage", async () => {
+  dbIt("groups estimate structure by physical site and named stage", async () => {
     const database = getDatabase();
     if (!database) return;
 
@@ -1630,6 +1630,24 @@ describe("Phase 7 baseline processing skeleton", () => {
     await publishDocumentIdentityResolved(fixture, secondContext, secondIdentity.id);
     await runBaselinePipelineToIdle(fixture);
 
+    const thirdContext = await createRegisteredDocumentContextForOrganization(database, {
+      organizationId: context.organization.id,
+      uploadedBy: context.user.id,
+      originalName: "estimate-c.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      extension: ".xlsx"
+    });
+    const thirdIdentity = await createEstimatePlacementIdentity(database, {
+      context: thirdContext,
+      normalizedValue: "PRJ-003-002-7-KM",
+      siteCode: "003",
+      stageName: "Этап 12.1",
+      siteName: "КС-9 \"Дальнереченская\""
+    });
+
+    await publishDocumentIdentityResolved(fixture, thirdContext, thirdIdentity.id);
+    await runBaselinePipelineToIdle(fixture);
+
     const nodes = await database
       .select()
       .from(schema.projectStructureNodes)
@@ -1655,21 +1673,22 @@ describe("Phase 7 baseline processing skeleton", () => {
     expect(stages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          key: "001",
+          key: "этап-12-1",
           title: "Этап 12.1",
           parentId: site?.id
         }),
         expect.objectContaining({
-          key: "002",
+          key: "этап-12-2",
           title: "Этап 12.2",
           parentId: site?.id
         })
       ])
     );
+    expect(stages).toHaveLength(2);
     expect(work).toMatchObject({
       key: "002",
       title: "Здание закрытого распределительного устройства",
-      parentId: stages.find((node) => node.key === "001")?.id
+      parentId: stages.find((node) => node.key === "этап-12-1")?.id
     });
     expect(placements).toEqual(
       expect.arrayContaining([
@@ -1679,6 +1698,10 @@ describe("Phase 7 baseline processing skeleton", () => {
         }),
         expect.objectContaining({
           documentVersionId: secondContext.version.id,
+          status: "placed"
+        }),
+        expect.objectContaining({
+          documentVersionId: thirdContext.version.id,
           status: "placed"
         })
       ])

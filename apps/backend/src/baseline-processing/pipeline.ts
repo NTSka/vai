@@ -1496,7 +1496,7 @@ function buildProjectStructureNameHints(input: {
   const siteTitle = rawSiteTitle ? normalizeSiteTitleHint(rawSiteTitle) : undefined;
   const siteKey = siteTitle ? stableStructureNameKey(siteTitle) : undefined;
   const stageTitle = readTypedFieldValue(projectContext["stageName"]);
-  const stageKey = siteCode ?? (stageTitle ? stableStructureNameKey(stageTitle) : undefined);
+  const stageKey = stageTitle ? stableStructureNameKey(stageTitle) : siteCode;
   const workTitle = readTypedFieldValue(projectContext["facilityName"]);
   const subobjectCode = readString(input.identity.parsedParts["subobjectCode"]);
   const subfacilityTitle = readTypedFieldValue(projectContext["subfacilityName"]);
