@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Upload } from "@lucide/svelte";
 
+  import type { UploadProgress } from "$lib/api/client";
   import type { DocumentSetStatus } from "$lib/api/types";
 
   export let busy = false;
   export let error = "";
+  export let progress: UploadProgress | null = null;
   export let documentSetStatus: DocumentSetStatus | null = null;
   export let onSubmit: (files: FileList) => void | Promise<void>;
 
@@ -32,6 +34,23 @@
     };
     return labels[value] ?? value;
   }
+
+  function formatBytes(value: number): string {
+    if (value < 1024 * 1024) {
+      return `${Math.max(1, Math.round(value / 1024))} КБ`;
+    }
+    return `${(value / (1024 * 1024)).toFixed(1)} МБ`;
+  }
+
+  function progressLabel(value: UploadProgress): string {
+    if (value.percent === null) {
+      return "Идет загрузка";
+    }
+    if (value.percent >= 100) {
+      return "Ждем ответ сервера";
+    }
+    return `${value.percent}%`;
+  }
 </script>
 
 <form class="panel p-4" on:submit|preventDefault={submit}>
@@ -54,6 +73,36 @@
   <button class="primary-button mt-3 w-full justify-center" disabled={busy}>
     {busy ? "Загружаем" : "Загрузить файлы"}
   </button>
+
+  {#if progress}
+    <div class="mt-3 border border-line bg-panel p-3" aria-live="polite">
+      <div class="mb-2 flex items-center justify-between gap-3 text-xs">
+        <span class="font-semibold text-ink">Передача файлов</span>
+        <span class="shrink-0 text-slate-600">
+          {progressLabel(progress)}
+        </span>
+      </div>
+      <div
+        class="h-2 overflow-hidden bg-white"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={progress.percent ?? undefined}
+      >
+        <div
+          class="h-full bg-accent transition-[width] duration-150"
+          style={`width: ${progress.percent ?? 100}%`}
+        ></div>
+      </div>
+      <div class="mt-2 text-xs text-slate-600">
+        {#if progress.totalBytes}
+          {formatBytes(progress.loadedBytes)} из {formatBytes(progress.totalBytes)}
+        {:else}
+          Отправлено {formatBytes(progress.loadedBytes)}
+        {/if}
+      </div>
+    </div>
+  {/if}
 
   {#if error}
     <p class="mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

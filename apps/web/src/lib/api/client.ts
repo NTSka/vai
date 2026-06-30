@@ -37,6 +37,18 @@ export class ApiError extends Error {
 
 type ApiFetch = typeof fetch;
 
+export interface UploadProgress {
+  loadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+}
+
+interface UploadInput {
+  organizationId: string;
+  files: FileList | File[];
+  onProgress?: (progress: UploadProgress) => void;
+}
+
 const emptyResponseSchema = {
   safeParse: () => ({ success: true, data: undefined }) as const
 } satisfies Pick<z.ZodType<void>, "safeParse">;
@@ -103,6 +115,101 @@ async function toApiError(response: Response): Promise<ApiError> {
   }
 }
 
+function uploadWithProgress(input: UploadInput): Promise<UploadResponse> {
+  const form = new FormData();
+  for (const file of Array.from(input.files)) {
+    form.append("files", file);
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/document-sets/uploads");
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("x-organization-id", input.organizationId);
+
+    xhr.upload.onprogress = (event) => {
+      const totalBytes = event.lengthComputable ? event.total : null;
+      input.onProgress?.({
+        loadedBytes: event.loaded,
+        totalBytes,
+        percent: totalBytes ? Math.round((event.loaded / totalBytes) * 100) : null
+      });
+    };
+
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(toXhrApiError(xhr));
+        return;
+      }
+
+      let body: unknown;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        reject(
+          new ApiError({
+            status: xhr.status,
+            code: "invalid_api_response",
+            message:
+              "Ответ backend для /document-sets/uploads не соответствует frontend-контракту"
+          })
+        );
+        return;
+      }
+
+      const parsed = uploadResponseSchema.safeParse(body);
+      if (!parsed.success) {
+        reject(
+          new ApiError({
+            status: xhr.status,
+            code: "invalid_api_response",
+            message:
+              "Ответ backend для /document-sets/uploads не соответствует frontend-контракту"
+          })
+        );
+        return;
+      }
+
+      resolve(parsed.data);
+    };
+
+    xhr.onerror = () => {
+      reject(
+        new ApiError({
+          status: xhr.status || 0,
+          code: "network_error",
+          message: "Не удалось отправить файлы"
+        })
+      );
+    };
+
+    xhr.send(form);
+  });
+}
+
+function toXhrApiError(xhr: XMLHttpRequest): ApiError {
+  const fallback = {
+    code: `http_${xhr.status}`,
+    message: xhr.statusText || "Request failed"
+  };
+
+  try {
+    const body = JSON.parse(xhr.responseText) as Partial<{
+      error: { code?: string; message?: string };
+      code: string;
+      message: string;
+    }>;
+    const nested = body.error;
+    return new ApiError({
+      status: xhr.status,
+      code: nested?.code ?? body.code ?? fallback.code,
+      message: nested?.message ?? body.message ?? fallback.message
+    });
+  } catch {
+    return new ApiError({ status: xhr.status, ...fallback });
+  }
+}
+
 export const api = {
   login(fetcher: ApiFetch, input: { login: string; password: string }) {
     return request<Session>(fetcher, "/auth/login", sessionSchema, {
@@ -121,27 +228,8 @@ export const api = {
     });
   },
 
-  upload(
-    fetcher: ApiFetch,
-    input: { organizationId: string; files: FileList | File[] }
-  ) {
-    const form = new FormData();
-    for (const file of Array.from(input.files)) {
-      form.append("files", file);
-    }
-
-    return request<UploadResponse>(
-      fetcher,
-      "/document-sets/uploads",
-      uploadResponseSchema,
-      {
-        method: "POST",
-        body: form,
-        headers: {
-          "x-organization-id": input.organizationId
-        }
-      }
-    );
+  upload(_fetcher: ApiFetch, input: UploadInput) {
+    return uploadWithProgress(input);
   },
 
   documentSetStatus(

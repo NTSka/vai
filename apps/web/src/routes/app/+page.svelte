@@ -6,7 +6,7 @@
   import ProjectTreePanel from "$lib/components/workspace/ProjectTreePanel.svelte";
   import UploadPanel from "$lib/components/workspace/UploadPanel.svelte";
   import WorkspaceHeader from "$lib/components/workspace/WorkspaceHeader.svelte";
-  import { api, ApiError } from "$lib/api/client";
+  import { api, ApiError, type UploadProgress } from "$lib/api/client";
   import { currentOrganization, session, sessionLoading } from "$lib/session";
   import type {
     DocumentSetStatus,
@@ -22,6 +22,7 @@
   let loadingWorkspace = true;
   let uploadBusy = false;
   let uploadError = "";
+  let uploadProgress: UploadProgress | null = null;
   let latestDocumentSetId = "";
   let documentSetStatus: DocumentSetStatus | null = null;
   let progress: ProcessingProgress | null = null;
@@ -87,13 +88,24 @@
 
     uploadBusy = true;
     uploadError = "";
+    uploadProgress = {
+      loadedBytes: 0,
+      totalBytes: Array.from(files).reduce((sum, file) => sum + file.size, 0),
+      percent: 0
+    };
 
     try {
       if (!organization) {
         uploadError = "Для загрузки нужна организация пользователя.";
         return;
       }
-      const result = await api.upload(fetch, { organizationId: organization.id, files });
+      const result = await api.upload(fetch, {
+        organizationId: organization.id,
+        files,
+        onProgress: (nextProgress) => {
+          uploadProgress = nextProgress;
+        }
+      });
       latestDocumentSetId = result.documentSetId;
       await refreshWorkspace();
     } catch (error) {
@@ -104,6 +116,7 @@
       uploadError = "Не удалось загрузить файлы. Проверьте формат и доступность сервера.";
     } finally {
       uploadBusy = false;
+      uploadProgress = null;
     }
   }
 
@@ -224,6 +237,7 @@
         <UploadPanel
           busy={uploadBusy}
           error={uploadError}
+          progress={uploadProgress}
           {documentSetStatus}
           onSubmit={submitUpload}
         />
