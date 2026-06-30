@@ -2,6 +2,7 @@ import type { z } from "zod";
 
 import {
   documentSetStatusSchema,
+  documentSetsSchema,
   nodeDocumentsSchema,
   processingProgressSchema,
   projectTreeSchema,
@@ -13,6 +14,7 @@ import {
 } from "./schemas";
 import type {
   DocumentSetStatus,
+  DocumentSets,
   NodeDocuments,
   ProcessingProgress,
   ProjectTree,
@@ -276,6 +278,14 @@ export const api = {
         input.organizationId
       )}/document-sets/${encodeURIComponent(input.documentSetId)}/status`,
       documentSetStatusSchema
+    );
+  },
+
+  documentSets(fetcher: ApiFetch, organizationId: string) {
+    return request<DocumentSets>(
+      fetcher,
+      `/organizations/${encodeURIComponent(organizationId)}/document-sets`,
+      documentSetsSchema
     );
   },
 

@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import DocumentListPanel from "$lib/components/workspace/DocumentListPanel.svelte";
+  import DocumentSetListPanel from "$lib/components/workspace/DocumentSetListPanel.svelte";
   import ProcessingPanel from "$lib/components/workspace/ProcessingPanel.svelte";
   import ProjectTreePanel from "$lib/components/workspace/ProjectTreePanel.svelte";
   import UploadPanel from "$lib/components/workspace/UploadPanel.svelte";
@@ -10,6 +11,7 @@
   import { currentOrganization, session, sessionLoading } from "$lib/session";
   import type {
     DocumentSetStatus,
+    DocumentSetSummary,
     NodeDocument,
     Organization,
     ProcessingProgress,
@@ -24,6 +26,9 @@
   let uploadError = "";
   let uploadProgress: UploadProgress | null = null;
   let latestDocumentSetId = "";
+  let documentSets: DocumentSetSummary[] = [];
+  let documentSetsLoading = false;
+  let documentSetsError = "";
   let documentSetStatus: DocumentSetStatus | null = null;
   let progress: ProcessingProgress | null = null;
   let tree: ProjectTree | null = null;
@@ -127,12 +132,26 @@
 
     refreshInFlight = true;
     try {
-      const [nextProgress, nextTree] = await Promise.all([
+      if (!options.quiet) {
+        documentSetsLoading = true;
+        documentSetsError = "";
+      }
+
+      const [nextProgress, nextTree, nextDocumentSets] = await Promise.all([
         api.progress(fetch, organization.id),
-        api.projectTree(fetch, organization.id)
+        api.projectTree(fetch, organization.id),
+        api.documentSets(fetch, organization.id)
       ]);
       progress = nextProgress;
       tree = nextTree;
+      documentSets = nextDocumentSets.documentSets;
+
+      if (
+        !latestDocumentSetId ||
+        !documentSets.some((documentSet) => documentSet.id === latestDocumentSetId)
+      ) {
+        latestDocumentSetId = documentSets[0]?.id ?? "";
+      }
 
       if (latestDocumentSetId) {
         documentSetStatus = await api.documentSetStatus(fetch, {
@@ -153,9 +172,29 @@
     } catch {
       if (!options.quiet) {
         documentsError = "Не удалось обновить состояние рабочей области.";
+        documentSetsError = "Не удалось загрузить комплекты документов.";
       }
     } finally {
       refreshInFlight = false;
+      if (!options.quiet) {
+        documentSetsLoading = false;
+      }
+    }
+  }
+
+  async function selectDocumentSet(documentSetId: string) {
+    if (!organization) {
+      return;
+    }
+
+    latestDocumentSetId = documentSetId;
+    try {
+      documentSetStatus = await api.documentSetStatus(fetch, {
+        organizationId: organization.id,
+        documentSetId
+      });
+    } catch {
+      documentsError = "Не удалось загрузить состояние выбранного комплекта.";
     }
   }
 
@@ -240,6 +279,13 @@
           progress={uploadProgress}
           {documentSetStatus}
           onSubmit={submitUpload}
+        />
+        <DocumentSetListPanel
+          {documentSets}
+          selectedDocumentSetId={latestDocumentSetId}
+          loading={documentSetsLoading}
+          error={documentSetsError}
+          onSelect={selectDocumentSet}
         />
         <ProcessingPanel {progress} />
       </section>

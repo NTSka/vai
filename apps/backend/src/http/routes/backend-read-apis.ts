@@ -30,6 +30,28 @@ const documentSetStatusResponseSchema = z.object({
   baselineUpdatedAt: z.date().nullable()
 });
 
+const documentSetsResponseSchema = z.object({
+  organizationId: z.string(),
+  documentSets: z.array(
+    z.object({
+      id: z.string(),
+      intakeStatus: z.enum(["uploaded", "intake_processing", "accepted", "failed"]),
+      baselineStatus: z.enum([
+        "not_started",
+        "processing",
+        "completed",
+        "completed_with_warnings",
+        "failed"
+      ]),
+      originalFileCount: z.number(),
+      warningCount: z.number(),
+      createdAt: z.date(),
+      updatedAt: z.date(),
+      baselineUpdatedAt: z.date().nullable()
+    })
+  )
+});
+
 const projectTreeNodeSchema = z.object({
   id: z.string(),
   parentId: z.string().nullable(),
@@ -231,6 +253,55 @@ const typedDataResponseSchema = z.object({
 export async function registerBackendReadApiRoutes(
   app: FastifyInstance
 ): Promise<void> {
+  app.get(
+    "/organizations/:organizationId/document-sets",
+    {
+      schema: {
+        description: "List recent document sets for an organization.",
+        tags: ["backend-read"],
+        params: organizationParamsSchema,
+        response: {
+          200: documentSetsResponseSchema
+        }
+      },
+      preHandler: app.requirePermission("document.view")
+    },
+    async (request) => {
+      const params = assertOrganizationParam(request.params as { organizationId: string }, request);
+      const db = requireDrizzle(app);
+      const documentIntake = createDocumentIntakeRepository(db);
+      const baseline = createBaselineProcessingRepository(db);
+      const documentSets = await documentIntake.listDocumentSets({
+        organizationId: params.organizationId,
+        limit: 50
+      });
+      const baselineResults = await baseline.listResultsForDocumentSets({
+        organizationId: params.organizationId,
+        documentSetIds: documentSets.map((documentSet) => documentSet.id)
+      });
+      const baselineByDocumentSetId = new Map(
+        baselineResults.map((result) => [result.documentSetId, result])
+      );
+
+      return {
+        organizationId: params.organizationId,
+        documentSets: documentSets.map((documentSet) => {
+          const baselineResult = baselineByDocumentSetId.get(documentSet.id);
+          return {
+            id: documentSet.id,
+            intakeStatus: documentSet.status,
+            baselineStatus: baselineResult?.status ?? "not_started",
+            originalFileCount: documentSet.originalFileIds.length,
+            warningCount: baselineResult?.warnings.length ?? 0,
+            createdAt: documentSet.createdAt,
+            updatedAt: documentSet.updatedAt,
+            baselineUpdatedAt: baselineResult?.updatedAt ?? null
+          };
+        })
+      };
+    }
+  );
+
   app.get(
     "/organizations/:organizationId/document-sets/:documentSetId/status",
     {

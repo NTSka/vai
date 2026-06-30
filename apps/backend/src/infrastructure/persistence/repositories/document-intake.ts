@@ -1,10 +1,14 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import * as schema from "../schema/index.js";
 import type { Db } from "./common.js";
 import { requireRow } from "./common.js";
 
 export type DocumentIntakeRepository = {
+  listDocumentSets(input: {
+    readonly organizationId: string;
+    readonly limit?: number;
+  }): Promise<ReadonlyArray<typeof schema.documentSets.$inferSelect>>;
   findDocumentSet(input: {
     readonly organizationId: string;
     readonly id: string;
@@ -37,6 +41,15 @@ export function createDocumentIntakeRepository(
   db: Db
 ): DocumentIntakeRepository {
   return {
+    async listDocumentSets(input) {
+      return db
+        .select()
+        .from(schema.documentSets)
+        .where(eq(schema.documentSets.organizationId, input.organizationId))
+        .orderBy(desc(schema.documentSets.createdAt))
+        .limit(input.limit ?? 50);
+    },
+
     async findDocumentSet(input) {
       const [documentSet] = await db
         .select()

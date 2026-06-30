@@ -357,6 +357,9 @@ function createArchiveFixture(input: {
     }
   };
   const documentIntake: DocumentIntakeRepository = {
+    async listDocumentSets() {
+      throw new Error("not used");
+    },
     async findDocumentSet() {
       return {
         id: "document-set-1",

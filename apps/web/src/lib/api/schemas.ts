@@ -58,6 +58,28 @@ export const documentSetStatusSchema = z.object({
   baselineUpdatedAt: dateStringSchema.nullable()
 });
 
+export const documentSetsSchema = z.object({
+  organizationId: z.string(),
+  documentSets: z.array(
+    z.object({
+      id: z.string(),
+      intakeStatus: z.enum(["uploaded", "intake_processing", "accepted", "failed"]),
+      baselineStatus: z.enum([
+        "not_started",
+        "processing",
+        "completed",
+        "completed_with_warnings",
+        "failed"
+      ]),
+      originalFileCount: z.number(),
+      warningCount: z.number(),
+      createdAt: dateStringSchema,
+      updatedAt: dateStringSchema,
+      baselineUpdatedAt: dateStringSchema.nullable()
+    })
+  )
+});
+
 export const processingProgressSchema = z.object({
   organizationId: z.string(),
   totalDocumentVersions: z.number(),

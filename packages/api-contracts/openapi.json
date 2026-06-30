@@ -199,6 +199,15 @@
         }
       }
     },
+    "/metrics": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/auth/login": {
       "post": {
         "requestBody": {
@@ -992,6 +1001,116 @@
                     "warnings",
                     "jobs",
                     "events"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organizationId}/document-sets": {
+      "get": {
+        "tags": [
+          "backend-read"
+        ],
+        "description": "List recent document sets for an organization.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "organizationId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "organizationId": {
+                      "type": "string"
+                    },
+                    "documentSets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "intakeStatus": {
+                            "type": "string",
+                            "enum": [
+                              "uploaded",
+                              "intake_processing",
+                              "accepted",
+                              "failed"
+                            ]
+                          },
+                          "baselineStatus": {
+                            "type": "string",
+                            "enum": [
+                              "not_started",
+                              "processing",
+                              "completed",
+                              "completed_with_warnings",
+                              "failed"
+                            ]
+                          },
+                          "originalFileCount": {
+                            "type": "number"
+                          },
+                          "warningCount": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "baselineUpdatedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              {
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "intakeStatus",
+                          "baselineStatus",
+                          "originalFileCount",
+                          "warningCount",
+                          "createdAt",
+                          "updatedAt",
+                          "baselineUpdatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "organizationId",
+                    "documentSets"
                   ],
                   "additionalProperties": false
                 }

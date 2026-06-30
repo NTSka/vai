@@ -32,6 +32,13 @@ export type DocumentSetStatus = ResponseBody<
 >;
 export type Warning = DocumentSetStatus["warnings"][number];
 
+export type DocumentSets = ResponseBody<
+  "/organizations/{organizationId}/document-sets",
+  "get",
+  200
+>;
+export type DocumentSetSummary = DocumentSets["documentSets"][number];
+
 export type ProcessingProgress = ResponseBody<
   "/organizations/{organizationId}/processing/progress",
   "get",

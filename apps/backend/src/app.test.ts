@@ -195,6 +195,7 @@ describe("backend app", () => {
       paths: {
         "/health/live": {},
         "/health/ready": {},
+        "/organizations/{organizationId}/document-sets": {},
         "/organizations/{organizationId}/document-sets/{documentSetId}/status": {},
         "/organizations/{organizationId}/processing/progress": {},
         "/organizations/{organizationId}/processing/diagnostics/document-sets/{documentSetId}":

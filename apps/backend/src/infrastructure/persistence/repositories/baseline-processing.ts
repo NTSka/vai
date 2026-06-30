@@ -1,10 +1,14 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import * as schema from "../schema/index.js";
 import type { Db } from "./common.js";
 import { requireRow } from "./common.js";
 
 export type BaselineProcessingRepository = {
+  listResultsForDocumentSets(input: {
+    readonly organizationId: string;
+    readonly documentSetIds: readonly string[];
+  }): Promise<ReadonlyArray<typeof schema.baselineProcessingResults.$inferSelect>>;
   findResultForDocumentSet(input: {
     readonly organizationId: string;
     readonly documentSetId: string;
@@ -33,6 +37,24 @@ export function createBaselineProcessingRepository(
   db: Db
 ): BaselineProcessingRepository {
   return {
+    async listResultsForDocumentSets(input) {
+      if (input.documentSetIds.length === 0) {
+        return [];
+      }
+
+      return db
+        .select()
+        .from(schema.baselineProcessingResults)
+        .where(
+          and(
+            eq(schema.baselineProcessingResults.organizationId, input.organizationId),
+            inArray(schema.baselineProcessingResults.documentSetId, [
+              ...input.documentSetIds
+            ])
+          )
+        );
+    },
+
     async findResultForDocumentSet(input) {
       const [result] = await db
         .select()
