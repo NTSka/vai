@@ -125,6 +125,7 @@ function uploadWithProgress(input: UploadInput): Promise<UploadResponse> {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/document-sets/uploads");
     xhr.withCredentials = true;
+    xhr.timeout = 30 * 60 * 1000;
     xhr.setRequestHeader("x-organization-id", input.organizationId);
 
     xhr.upload.onprogress = (event) => {
@@ -179,6 +180,26 @@ function uploadWithProgress(input: UploadInput): Promise<UploadResponse> {
           status: xhr.status || 0,
           code: "network_error",
           message: "Не удалось отправить файлы"
+        })
+      );
+    };
+
+    xhr.ontimeout = () => {
+      reject(
+        new ApiError({
+          status: 0,
+          code: "upload_timeout",
+          message: "Загрузка заняла слишком много времени"
+        })
+      );
+    };
+
+    xhr.onabort = () => {
+      reject(
+        new ApiError({
+          status: 0,
+          code: "upload_aborted",
+          message: "Загрузка отменена"
         })
       );
     };
